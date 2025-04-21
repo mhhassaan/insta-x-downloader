@@ -1,0 +1,424 @@
+<!-- templates/index.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Social Media Downloader</title>
+    <style>
+        body {
+            font-family: Inter, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            /* background-color: #3d5d82; */
+            background: linear-gradient(to bottom right, #eef5ff, #f8fbff);
+            color: #333;
+        }
+        .container {
+            background-color: rgb(255, 255, 255);
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1da1f2;
+            text-align: center;
+        }
+        .input-group {
+            display: flex;
+            margin-bottom: 20px;
+        }
+        input[type="text"] {
+            flex-grow: 1;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px 0 0 4px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            background-color: #1da1f2;
+            color: white;
+            border: none;
+            border-radius: 0 4px 4px 0;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        button:hover {
+            background-color: #0d8ecf;
+        }
+        .loader {
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid #1da1f2;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+            display: none;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .results {
+            margin-top: 20px;
+        }
+        .media-item {
+            margin-bottom: 15px;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .media-item a {
+            display: inline-block;
+            padding: 8px 15px;
+            background-color: #1da1f2;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .media-item a:hover {
+            background-color: #0d8ecf;
+        }
+        .error {
+            color: #e0245e;
+            text-align: center;
+            margin-top: 20px;
+        }
+        .status {
+            text-align: center;
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        .pending {
+            color: #f39c12;
+        }
+        .downloading {
+            color: #3498db;
+        }
+        .completed {
+            color: #2ecc71;
+        }
+        .failed {
+            color: #e74c3c;
+        }
+        .platform-toggle {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .platform-btn {
+            padding: 8px 15px;
+            margin: 0 5px;
+            background-color: #eaeaea;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .platform-btn.active {
+            background-color: #1da1f2;
+            color: white;
+        }
+        .instructions {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            line-height: 1.5;
+        }
+        .progress-bar-container {
+            width: 100%;
+            background-color: #f3f3f3;
+            height: 20px;
+            border-radius: 10px;
+            margin: 15px 0;
+            overflow: hidden;
+        }
+        .progress-bar {
+            height: 100%;
+            background-color: #4CAF50;
+            width: 0%;
+            border-radius: 10px;
+            transition: width 0.5s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 12px;
+        }
+        .clear-btn {
+            background-color: #e74c3c;
+            padding: 8px 15px;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        .clear-btn:hover {
+            background-color: #c0392b;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Social Media Downloader</h1>
+        <p class="instructions">Download media from Instagram and Twitter/X posts easily.</p>
+        
+        <div class="instructions">
+            <p><strong>Supported platforms:</strong> Instagram and Twitter/X</p>
+            <p><strong>Naming format:</strong> username_date_number.extension</p>
+            <p><strong>How to use:</strong></p>
+            <ol>
+                <li>Paste a post URL from Instagram or Twitter</li>
+                <li>Click Download and wait for processing</li>
+                <li>Download files individually when ready</li>
+            </ol>
+            <p><strong>Note:</strong> Downloading might take a few moments depending on the media size and server load.</p>
+        </div>
+        
+        <div class="platform-toggle">
+            <button class="platform-btn active" data-platform="all">All Platforms</button>
+            <button class="platform-btn" data-platform="instagram">Instagram</button>
+            <button class="platform-btn" data-platform="twitter">Twitter/X</button>
+        </div>
+        
+        <div class="input-group">
+            <input type="text" id="url-input" placeholder="Paste Instagram or Twitter URL here">
+            <button id="download-btn">Download</button>
+        </div>
+        
+        <div class="status" id="status"></div>
+        <div class="progress-bar-container" id="progress-container" style="display: none;">
+            <div class="progress-bar" id="progress-bar">0%</div>
+        </div>
+        
+        <div class="loader" id="loader"></div>
+        <div class="error" id="error-message"></div>
+        <div class="results" id="results"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlInput = document.getElementById('url-input');
+            const downloadBtn = document.getElementById('download-btn');
+            const loader = document.getElementById('loader');
+            const errorMessage = document.getElementById('error-message');
+            const results = document.getElementById('results');
+            const status = document.getElementById('status');
+            const progressContainer = document.getElementById('progress-container');
+            const progressBar = document.getElementById('progress-bar');
+            const platformBtns = document.querySelectorAll('.platform-btn');
+            
+            let activePlatform = 'all';
+            let currentJobId = null;
+            let jobCheckInterval = null;
+            let progressValue = 0;
+            
+            // Platform toggle functionality
+            platformBtns.forEach(btn => {
+                btn.addEventListener('click', function() {
+                    platformBtns.forEach(b => b.classList.remove('active'));
+                    this.classList.add('active');
+                    activePlatform = this.getAttribute('data-platform');
+                    
+                    // Update placeholder based on selected platform
+                    if (activePlatform === 'instagram') {
+                        urlInput.placeholder = 'Paste Instagram URL here';
+                    } else if (activePlatform === 'twitter') {
+                        urlInput.placeholder = 'Paste Twitter/X URL here';
+                    } else {
+                        urlInput.placeholder = 'Paste Instagram or Twitter URL here';
+                    }
+                });
+            });
+            
+            downloadBtn.addEventListener('click', function() {
+                const url = urlInput.value.trim();
+                
+                if (!url) {
+                    showError('Please enter a URL');
+                    return;
+                }
+                
+                // Validate URL based on selected platform
+                if (activePlatform === 'instagram' && !url.includes('instagram.com')) {
+                    showError('Please enter a valid Instagram URL');
+                    return;
+                }
+                
+                if (activePlatform === 'twitter' && !url.includes('twitter.com') && !url.includes('x.com')) {
+                    showError('Please enter a valid Twitter/X URL');
+                    return;
+                }
+                
+                if (activePlatform === 'all' && !url.includes('instagram.com') && !url.includes('twitter.com') && !url.includes('x.com')) {
+                    showError('Please enter a valid Instagram or Twitter/X URL');
+                    return;
+                }
+                
+                // Clear previous results and errors
+                results.innerHTML = '';
+                errorMessage.textContent = '';
+                status.textContent = '';
+                status.className = 'status';
+                
+                // Stop any existing job check interval
+                if (jobCheckInterval) {
+                    clearInterval(jobCheckInterval);
+                    jobCheckInterval = null;
+                }
+                
+                // Reset and show progress elements
+                progressValue = 0;
+                progressBar.style.width = '0%';
+                progressBar.textContent = '0%';
+                progressContainer.style.display = 'block';
+                
+                // Show loader
+                loader.style.display = 'block';
+                
+                // Send request to server
+                fetch('/download', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ url: url }),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        showError(data.error);
+                        hideProgress();
+                        return;
+                    }
+                    
+                    if (data.job_id) {
+                        currentJobId = data.job_id;
+                        status.textContent = 'Job started: Preparing to download...';
+                        status.className = 'status pending';
+                        
+                        // Start progress animation
+                        progressValue = 10;
+                        updateProgressBar();
+                        
+                        // Start polling for job status
+                        jobCheckInterval = setInterval(checkJobStatus, 1000);
+                    }
+                })
+                .catch(error => {
+                    loader.style.display = 'none';
+                    showError('An error occurred. Please try again.');
+                    hideProgress();
+                    console.error('Error:', error);
+                });
+            });
+            
+            function checkJobStatus() {
+                if (!currentJobId) return;
+                
+                fetch(`/job/${currentJobId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.error) {
+                            clearInterval(jobCheckInterval);
+                            showError(data.error);
+                            hideProgress();
+                            return;
+                        }
+                        
+                        // Update status display
+                        if (data.status === 'pending') {
+                            status.textContent = 'Pending: Waiting for download to begin...';
+                            status.className = 'status pending';
+                            progressValue = Math.min(30, progressValue + 2);
+                        } else if (data.status === 'downloading') {
+                            status.textContent = 'Downloading media...';
+                            status.className = 'status downloading';
+                            progressValue = Math.min(60, progressValue + 5);
+                        } else if (data.status === 'completed') {
+                            clearInterval(jobCheckInterval);
+                            loader.style.display = 'none';
+                            status.textContent = 'Download completed successfully!';
+                            status.className = 'status completed';
+                            progressValue = 100;
+                            
+                            // Show download links
+                            displayResults(data);
+                            
+                            // Clean up job on server
+                            setTimeout(() => {
+                                fetch(`/clear_job/${currentJobId}`, { method: 'POST' });
+                            }, 5000);
+                        } else if (data.status === 'failed') {
+                            clearInterval(jobCheckInterval);
+                            showError(data.error || 'Download failed');
+                            status.textContent = 'Download failed';
+                            status.className = 'status failed';
+                            hideProgress();
+                        }
+                        
+                        updateProgressBar();
+                    })
+                    .catch(error => {
+                        console.error('Error checking job status:', error);
+                    });
+            }
+            
+            function displayResults(data) {
+                if (data.files && data.files.length > 0) {
+                    const username = data.username || 'unknown';
+                    
+                    results.innerHTML = '<h3>Downloaded Files:</h3>';
+                    
+                    data.files.forEach(file => {
+                        const mediaItem = document.createElement('div');
+                        mediaItem.className = 'media-item';
+                        
+                        mediaItem.innerHTML = `
+                            <span>${file.filename}</span>
+                            <a href="/get_file/${file.filename}" download>Download</a>
+                        `;
+                        
+                        results.appendChild(mediaItem);
+                    });
+                    
+                    // Add a clear button
+                    const clearBtn = document.createElement('button');
+                    clearBtn.className = 'clear-btn';
+                    clearBtn.textContent = 'Clear Results';
+                    clearBtn.addEventListener('click', function() {
+                        results.innerHTML = '';
+                        status.textContent = '';
+                        status.className = 'status';
+                        hideProgress();
+                    });
+                    
+                    results.appendChild(clearBtn);
+                }
+            }
+            
+            function showError(message) {
+                errorMessage.textContent = message;
+                loader.style.display = 'none';
+            }
+            
+            function hideProgress() {
+                progressContainer.style.display = 'none';
+            }
+            
+            function updateProgressBar() {
+                progressBar.style.width = progressValue + '%';
+                progressBar.textContent = progressValue + '%';
+            }
+        });
+    </script>
+</body>
+</html>
