@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__)
 
 # Create directories if they don't exist
-os.makedirs('downloads', exist_ok=True)
+DOWNLOAD_DIR = '/tmp/downloads'
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # Store background jobs
 background_jobs = {}
@@ -107,7 +108,7 @@ def download_instagram(url, job_id):
             
             # Create new filename: username_date_number.ext
             new_filename = f"{clean_filename(username)}_{current_date}_{i+1}{ext}"
-            new_path = os.path.join('downloads', new_filename)
+            new_path = os.path.join(DOWNLOAD_DIR, new_filename)
             
             # Copy the file (using copy2 to preserve metadata)
             shutil.copy2(file_path, new_path)
@@ -204,7 +205,7 @@ def download_twitter(url, job_id):
             
             # Create new filename: username_date_number.ext
             new_filename = f"{clean_filename(username)}_{current_date}_{i+1}{ext}"
-            new_path = os.path.join('downloads', new_filename)
+            new_path = os.path.join(DOWNLOAD_DIR, new_filename)
             
             # Copy the file (using copy2 to preserve metadata)
             shutil.copy2(file_path, new_path)
@@ -275,7 +276,7 @@ def check_job(job_id):
 
 @app.route('/get_file/<filename>')
 def get_file(filename):
-    file_path = os.path.join('downloads', filename)
+    file_path = os.path.join(DOWNLOAD_DIR, filename)
     if os.path.exists(file_path):
         return send_file(file_path, as_attachment=True)
     else:
