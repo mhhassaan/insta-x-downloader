@@ -443,7 +443,31 @@
         data.files.forEach(file => {
           const mediaItem = document.createElement('div');
           mediaItem.className = 'media-item';
-          mediaItem.innerHTML = `<span>${file.filename}</span><a href="/get_file/${file.filename}" download>Download</a>`;
+
+          const fileUrl = `/get_file/${file.filename}`;
+
+          // If it's an image (jpg, jpeg, png, gif)
+          if (file.filename.match(/\.(jpg|jpeg|png|gif)$/i)) {
+            const img = document.createElement('img');
+            img.src = fileUrl;
+            img.alt = `Preview of ${file.filename}`;
+            img.style.maxWidth = '200px'; // Set a max width for preview
+            img.style.marginRight = '10px'; // Space between image and filename
+            mediaItem.appendChild(img);
+          }
+          // If it's a video (mp4, mov, webm)
+          else if (file.filename.match(/\.(mp4|mov|webm)$/i)) {
+            const video = document.createElement('video');
+            video.src = fileUrl;
+            video.controls = true;
+            video.style.maxWidth = '300px'; // Set a max width for video preview
+            video.style.marginRight = '10px'; // Space between video and filename
+            mediaItem.appendChild(video);
+          }
+
+          // Filename and download link
+          mediaItem.innerHTML += `<span>${file.filename}</span><a href="${fileUrl}" download>Download</a>`;
+  
           results.appendChild(mediaItem);
         });
 

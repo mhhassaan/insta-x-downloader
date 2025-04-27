@@ -276,11 +276,12 @@ def check_job(job_id):
 
 @app.route('/get_file/<filename>')
 def get_file(filename):
-    file_path = os.path.join(DOWNLOAD_DIR, filename)
+    file_path = os.path.join(DOWNLOAD_DIR, filename)  # use /tmp
     if os.path.exists(file_path):
-        return send_file(file_path, as_attachment=True)
+        return send_file(file_path)  # no "as_attachment", allow inline preview
     else:
         return jsonify({"error": "File not found"}), 404
+
 
 @app.route('/clear_job/<job_id>', methods=['POST'])
 def clear_job(job_id):
