@@ -1,6 +1,7 @@
 # app.py
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
 import os
+import yt_dlp as ytdlp
 from datetime import datetime
 import subprocess
 import re
@@ -11,6 +12,7 @@ import logging
 import threading
 import time
 import instaloader
+
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, 
@@ -131,9 +133,16 @@ def download_instagram(url, job_id):
             job_info['status'] = 'failed'
             job_info['error'] = f"Error: {str(e)}"
 
+
+
 def download_twitter(url, job_id):
-    """Download media from Twitter using yt-dlp"""
+    """Download media from Twitter using yt-dlp library"""
     try:
+        # Check if the URL is None or invalid
+        if not url:
+            logger.error("Invalid or None URL provided.")
+            raise ValueError("Invalid URL")
+
         logger.info(f"Processing Twitter URL: {url}")
         
         # Create a temporary directory for yt-dlp output
@@ -154,36 +163,38 @@ def download_twitter(url, job_id):
         current_date = datetime.now().strftime("%Y%m%d")
         output_template = os.path.join(temp_dir, f"%(id)s.%(ext)s")
         
-        # Run yt-dlp to download the media
-        command = [
-            'yt-dlp',
-            '--no-warnings',
-            '--no-progress',
-            '--no-playlist',
-            '-o', output_template,
-            url
-        ]
-        
-        logger.debug(f"Running command: {' '.join(command)}")
-        
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        
-        stdout, stderr = process.communicate()
-        
-        if process.returncode != 0:
-            logger.error(f"yt-dlp error: {stderr}")
+        # yt-dlp options for downloading
+        ydl_opts = {
+            'outtmpl': output_template,
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': True,
+            'quiet': True,
+            'no_warnings': True,
+            # 'postprocessors': [{
+            #     'key': 'FFmpegVideoConvertor',  # Correct key for video conversion
+            #     'format': 'bestvideo+bestaudio/best',  # Specify the output format
+            # }],
+        }
+
+        # Create a yt-dlp object
+        with ytdlp.YoutubeDL(ydl_opts) as ydl:
+            logger.debug(f"Downloading media from URL: {url}")
+            try:
+                info_dict = ydl.extract_info(url, download=True)
+            except Exception as e:
+                logger.error(f"Error extracting info from URL: {str(e)}")
+                raise e
+
+        # Check if info_dict is None or doesn't contain the necessary data
+        if not info_dict:
+            logger.error("Failed to extract information from the URL.")
             job_info['status'] = 'failed'
-            job_info['error'] = f"yt-dlp error: {stderr}"
+            job_info['error'] = "Failed to extract media info from the URL."
             return
         
         # Find all files in the temp directory
         downloaded_files = []
-        
         for root, _, files in os.walk(temp_dir):
             for file in files:
                 if file.endswith(('.jpg', '.mp4', '.webp', '.png', '.webm')):
@@ -198,7 +209,6 @@ def download_twitter(url, job_id):
         
         # Move files to downloads directory with proper naming
         result_files = []
-        
         for i, file_path in enumerate(downloaded_files):
             # Get file extension
             _, ext = os.path.splitext(file_path)
@@ -227,6 +237,7 @@ def download_twitter(url, job_id):
         if job_info:
             job_info['status'] = 'failed'
             job_info['error'] = f"Error: {str(e)}"
+
 
 @app.route('/')
 def index():
