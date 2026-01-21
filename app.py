@@ -20,7 +20,10 @@ logging.basicConfig(level=logging.DEBUG,
 logger = logging.getLogger(__name__)
 
 # Initialize static_ffmpeg to ensure binaries are in path
-static_ffmpeg.add_paths()
+try:
+    static_ffmpeg.add_paths()
+except Exception as e:
+    logger.error(f"Failed to initialize static_ffmpeg: {e}")
 
 app = Flask(__name__)
 
