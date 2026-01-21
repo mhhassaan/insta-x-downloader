@@ -41,14 +41,33 @@ background_jobs = {}
 generated_files = set()
 
 # Configure FFmpeg Path
-# Default to system 'ffmpeg' command (requires ffmpeg in PATH)
-FFMPEG_PATH = 'ffmpeg'
+def get_ffmpeg_path():
+    # 1. Check system path (including what static_ffmpeg might have added)
+    system_path = shutil.which('ffmpeg')
+    if system_path:
+        return system_path
+    
+    # 2. Check local 'bin' directory (common pattern for Vercel/serverless)
+    # We check both 'ffmpeg' (Linux/Mac) and 'ffmpeg.exe' (Windows)
+    local_bin_dir = os.path.join(os.getcwd(), 'bin')
+    
+    local_bin = os.path.join(local_bin_dir, 'ffmpeg')
+    if os.path.exists(local_bin): # Checks execute permission implicitly on unix if we try to run it, but explicit check is good
+        return local_bin
+        
+    local_bin_exe = os.path.join(local_bin_dir, 'ffmpeg.exe')
+    if os.path.exists(local_bin_exe):
+        return local_bin_exe
+
+    return None
+
+FFMPEG_PATH = get_ffmpeg_path()
 
 # Startup Check for FFmpeg
-if not shutil.which(FFMPEG_PATH):
-    logger.warning("CRITICAL: 'ffmpeg' command not found in system PATH. Cropping features will fail. Please install FFmpeg and restart your terminal.")
+if not FFMPEG_PATH:
+    logger.warning("CRITICAL: 'ffmpeg' command not found. Cropping and some downloads may fail.")
 else:
-    logger.info(f"FFmpeg found: {shutil.which(FFMPEG_PATH)}")
+    logger.info(f"FFmpeg found at: {FFMPEG_PATH}")
 
 def clean_filename(filename):
     """Clean filename to ensure it's valid for the filesystem"""
@@ -195,8 +214,10 @@ def download_twitter(url, job_id):
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'ffmpeg_location': FFMPEG_PATH, # Point to ffmpeg
         }
+        
+        if FFMPEG_PATH:
+            ydl_opts['ffmpeg_location'] = FFMPEG_PATH
 
         # Create a yt-dlp object
         with ytdlp.YoutubeDL(ydl_opts) as ydl:
@@ -389,6 +410,9 @@ def crop_video():
     if not filename:
         return jsonify({"error": "No filename provided"}), 400
         
+    if not FFMPEG_PATH:
+        return jsonify({"error": "FFmpeg is not available on the server."}), 501
+
     input_path = os.path.join(DOWNLOAD_DIR, filename)
     if not os.path.exists(input_path):
         return jsonify({"error": "File not found"}), 404
