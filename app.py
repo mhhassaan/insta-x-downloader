@@ -1,5 +1,5 @@
 # app.py
-from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
+from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, after_this_request
 import os
 import yt_dlp as ytdlp
 from datetime import datetime
@@ -12,29 +12,52 @@ import logging
 import threading
 import time
 import instaloader
-
+import static_ffmpeg
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Initialize static_ffmpeg to ensure binaries are in path
+static_ffmpeg.add_paths()
+
 app = Flask(__name__)
 
 # Create directories if they don't exist
-DOWNLOAD_DIR = '/tmp/downloads'
+if os.environ.get('VERCEL'):
+    DOWNLOAD_DIR = '/tmp/downloads'
+else:
+    DOWNLOAD_DIR = os.path.join(os.getcwd(), 'downloads')
+
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 # Store background jobs
 background_jobs = {}
+# Store all generated files for session cleanup
+generated_files = set()
+
+# Configure FFmpeg Path
+# Default to system 'ffmpeg' command (requires ffmpeg in PATH)
+FFMPEG_PATH = 'ffmpeg'
+
+# Startup Check for FFmpeg
+if not shutil.which(FFMPEG_PATH):
+    logger.warning("CRITICAL: 'ffmpeg' command not found in system PATH. Cropping features will fail. Please install FFmpeg and restart your terminal.")
+else:
+    logger.info(f"FFmpeg found: {shutil.which(FFMPEG_PATH)}")
 
 def clean_filename(filename):
     """Clean filename to ensure it's valid for the filesystem"""
     # Replace invalid characters with underscores
-    cleaned = re.sub(r'[\\/*?:"<>|]', '_', filename)
+    cleaned = re.sub(r'[\\/*?:\"<>|]', '_', filename)
     # Remove extra whitespace
     cleaned = ' '.join(cleaned.split())
     return cleaned
+
+def track_file(filename):
+    """Add filename to the tracking set"""
+    generated_files.add(filename)
 
 def download_instagram(url, job_id):
     """Download media from Instagram using instaloader Python library"""
@@ -117,6 +140,7 @@ def download_instagram(url, job_id):
             logger.info(f"Saved Instagram media as: {new_filename}")
             
             result_files.append({"filename": new_filename, "path": new_path})
+            track_file(new_filename)
         
         # Update job info
         job_info['status'] = 'completed'
@@ -132,7 +156,6 @@ def download_instagram(url, job_id):
         if job_info:
             job_info['status'] = 'failed'
             job_info['error'] = f"Error: {str(e)}"
-
 
 
 def download_twitter(url, job_id):
@@ -169,12 +192,7 @@ def download_twitter(url, job_id):
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'quiet': True,
-            'no_warnings': True,
-            # 'postprocessors': [{
-            #     'key': 'FFmpegVideoConvertor',  # Correct key for video conversion
-            #     'format': 'bestvideo+bestaudio/best',  # Specify the output format
-            # }],
+            'ffmpeg_location': FFMPEG_PATH, # Point to ffmpeg
         }
 
         # Create a yt-dlp object
@@ -197,7 +215,7 @@ def download_twitter(url, job_id):
         downloaded_files = []
         for root, _, files in os.walk(temp_dir):
             for file in files:
-                if file.endswith(('.jpg', '.mp4', '.webp', '.png', '.webm')):
+                if file.endswith(('.jpg', '.mp4', '.webp', '.png', '.webm', '.gif')):
                     file_path = os.path.join(root, file)
                     downloaded_files.append(file_path)
         
@@ -222,6 +240,7 @@ def download_twitter(url, job_id):
             logger.info(f"Saved Twitter media as: {new_filename}")
             
             result_files.append({"filename": new_filename, "path": new_path})
+            track_file(new_filename)
         
         # Update job info
         job_info['status'] = 'completed'
@@ -294,11 +313,116 @@ def get_file(filename):
         return jsonify({"error": "File not found"}), 404
 
 
+import io
+
+@app.route('/download_and_delete/<filename>')
+def download_and_delete(filename):
+    file_path = os.path.join(DOWNLOAD_DIR, filename)
+    if not os.path.exists(file_path):
+        return jsonify({"error": "File not found"}), 404
+
+    try:
+        # Read file into memory
+        with open(file_path, 'rb') as f:
+            file_data = io.BytesIO(f.read())
+        
+        # Delete file from disk immediately
+        os.remove(file_path)
+        logger.info(f"Deleted file (loaded to memory): {filename}")
+        
+        # Remove from tracking set
+        if filename in generated_files:
+            generated_files.remove(filename)
+
+        # Serve from memory
+        return send_file(
+            file_data,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/octet-stream'
+        )
+
+    except Exception as e:
+        logger.error(f"Error in download_and_delete: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/clear_job/<job_id>', methods=['POST'])
 def clear_job(job_id):
     if job_id in background_jobs:
         del background_jobs[job_id]
     return jsonify({"success": True})
+
+@app.route('/cleanup_session', methods=['POST'])
+def cleanup_session():
+    """Delete all files generated in this session"""
+    count = 0
+    # Create a copy to iterate while modifying
+    for filename in list(generated_files):
+        file_path = os.path.join(DOWNLOAD_DIR, filename)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                logger.info(f"Cleaned up file: {filename}")
+                generated_files.remove(filename)
+                count += 1
+            except OSError as e:
+                logger.error(f"Failed to cleanup {filename}: {e}")
+        else:
+            # File might have been downloaded and deleted already
+            generated_files.remove(filename)
+            
+    return jsonify({"success": True, "count": count})
+
+@app.route('/crop', methods=['POST'])
+def crop_video():
+    data = request.get_json()
+    filename = data.get('filename')
+    x = int(data.get('x'))
+    y = int(data.get('y'))
+    w = int(data.get('width'))
+    h = int(data.get('height'))
+    
+    if not filename:
+        return jsonify({"error": "No filename provided"}), 400
+        
+    input_path = os.path.join(DOWNLOAD_DIR, filename)
+    if not os.path.exists(input_path):
+        return jsonify({"error": "File not found"}), 404
+        
+    # Generate output filename
+    name, ext = os.path.splitext(filename)
+    output_filename = f"{name}_cropped_{int(time.time())}{ext}"
+    output_path = os.path.join(DOWNLOAD_DIR, output_filename)
+    
+    # Construct ffmpeg command
+    # crop=w:h:x:y
+    filter_str = f"crop={w}:{h}:{x}:{y}"
+    
+    command = [
+        FFMPEG_PATH,
+        '-y', # Overwrite output files without asking
+        '-i', input_path,
+        '-vf', filter_str,
+        '-c:a', 'copy', # Copy audio stream without re-encoding
+        output_path
+    ]
+    
+    try:
+        logger.info(f"Running crop command: {' '.join(command)}")
+        result = subprocess.run(command, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"FFmpeg failed: {result.stderr}")
+            return jsonify({"error": f"FFmpeg failed: {result.stderr}"}), 500
+            
+        # Track the new file
+        track_file(output_filename)
+        return jsonify({"success": True, "filename": output_filename})
+        
+    except Exception as e:
+        logger.error(f"Error executing crop: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)

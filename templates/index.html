@@ -1,488 +1,965 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>InstaXMedia Downloader</title>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet"/>
-  <style>
-    body {
-      font-family: Josefin Sans, sans-serif;
-      margin: 0;
-      background: linear-gradient(to bottom right, #1a1f2b, #6f42c1);
-      color: #f0f0f0;
-      padding: 40px 20px;
-      min-height: 100vh;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      flex-direction: column;
-      box-sizing: border-box;
-    }
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>InstaX Downloader</title>
+    <!-- Fonts: Syne for display, Manrope for UI -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
+    
+    <style>
+        :root {
+            --bg-deep: #050505;
+            --bg-card: #0a0a0a;
+            --accent-acid: #bef264; /* Acid Lime */
+            --accent-glow: rgba(190, 242, 100, 0.4);
+            --text-main: #f0f0f0;
+            --text-muted: #666;
+            --border-subtle: rgba(255, 255, 255, 0.1);
+            
+            --font-display: 'Syne', sans-serif;
+            --font-ui: 'Manrope', sans-serif;
+        }
 
-    .container {
-      background-color: rgba(30, 37, 51, 0.6);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
-      border-radius: 16px;
-      padding: 30px;
-      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
-      transition: background-color 0.3s ease;
-      width: 100%;
-      max-width: 800px;
-      margin-bottom: 40px;
-    }
+        * { box-sizing: border-box; }
 
-    h1 {
-      text-align: center;
-      color: #1da1f2;
-      font-size: 2rem;
-      margin-bottom: 20px;
-    }
+        body {
+            font-family: var(--font-ui);
+            margin: 0;
+            background-color: var(--bg-deep);
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+        }
 
-    h2 {
-      color: #1da1f2;
-      font-size: 1.5rem;
-      margin-bottom: 10px;
-      margin-top: 10px;
-    }
+        /* --- NOISE TEXTURE --- */
+        .noise-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            opacity: 0.05;
+            pointer-events: none;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+        }
 
-    .instructions {
-      background-color: #2b3242;
-      padding: 20px;
-      border-radius: 10px;
-      margin-bottom: 20px;
-    }
+        /* --- LAYOUT --- */
+        .app-layout {
+            display: flex;
+            width: 100%;
+            height: 100%;
+            position: relative;
+            z-index: 1;
+        }
 
-    .instructions p,
-    .instructions ol li {
-      margin: 10px 0;
-      margin-bottom:10px;
-      color: #ccc;
-    }
+        /* LEFT PANEL */
+        .control-panel {
+            width: 60I j0px;
+            flex-shrink: 0;
+            padding: 80px 60px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            border-right: 1px solid var(--border-subtle);
+            position: relative;
+            z-index: 10;
+        }
 
-    .instructions strong {
-      color: #fff;
-    }
+        /* RIGHT PANEL */
+        .results-panel {
+            flex-grow: 1;
+            padding: 80px;
+            overflow-y: auto;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            background: radial-gradient(circle at 80% 20%, rgba(20, 20, 20, 1), transparent 60%);
+        }
 
-    .platform-toggle {
-      display: flex;
-      justify-content: center;
-      margin-bottom: 20px;
-    }
+        /* --- TYPOGRAPHY --- */
+        h1 {
+            font-family: var(--font-display);
+            font-size: 5rem;
+            font-weight: 800;
+            margin: 0;
+            line-height: 0.9;
+            letter-spacing: -0.02em;
+            color: #fff;
+            text-transform: uppercase;
+        }
 
-    .platform-btn {
-      padding: 10px 20px;
-      margin: 0 5px;
-      background-color: #3a3f51;
-      color: #ddd;
-      border: none;
-      border-radius: 8px;
-      cursor: pointer;
-      transition: background-color 0.3s ease;
-    }
+        p.subtitle {
+            font-family: var(--font-ui);
+            color: var(--text-muted);
+            font-size: 1rem;
+            margin-top: 16px;
+            margin-bottom: 60px;
+            font-weight: 400;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        p.subtitle::before {
+            content: '';
+            display: block;
+            width: 40px;
+            height: 1px;
+            background: var(--accent-acid);
+        }
 
-    .platform-btn.active {
-      background-color: #1da1f2;
-      color: #fff;
-    }
+        /* --- CONTROLS --- */
+        .input-group {
+            margin-bottom: 40px;
+            position: relative;
+        }
+        
+        .label {
+            display: block;
+            margin-bottom: 12px;
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
 
-    .input-group {
-      display: flex;
-      margin-bottom: 20px;
-    }
+        /* Minimalist Input */
+        input[type="text"] {
+            width: 100%;
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid var(--border-subtle);
+            color: #fff;
+            padding: 16px 0;
+            font-size: 1.5rem;
+            font-family: var(--font-display);
+            outline: none;
+            transition: all 0.3s;
+            border-radius: 0;
+        }
 
-    input[type="text"] {
-      flex-grow: 1;
-      padding: 12px;
-      border: 1px solid #555;
-      background-color: #2a3140;
-      color: #fff;
-      border-radius: 8px 0 0 8px;
-      font-size: 16px;
-      outline: none;
-    }
+        input[type="text"]:focus {
+            border-color: var(--accent-acid);
+            box-shadow: 0 10px 20px -10px var(--accent-glow);
+        }
+        
+        input[type="text"]::placeholder {
+            color: #333;
+        }
 
-    button {
-      padding: 12px 20px;
-      background-color: #1da1f2;
-      color: white;
-      border: none;
-      border-radius: 0 8px 8px 0;
-      cursor: pointer;
-      font-size: 16px;
-    }
+        /* Tabs as minimal toggles */
+        .tabs {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 40px;
+        }
 
-    button:hover {
-      background-color: #0d8ecf;
-    }
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 0;
+            cursor: pointer;
+            font-family: var(--font-ui);
+            font-weight: 500;
+            font-size: 0.9rem;
+            transition: all 0.3s;
+            position: relative;
+        }
 
-    .loader {
-      border: 4px solid #f3f3f3;
-      border-top: 4px solid #1da1f2;
-      border-radius: 50%;
-      width: 30px;
-      height: 30px;
-      animation: spin 1s linear infinite;
-      margin: 20px auto;
-      display: none;
-    }
+        .tab-btn.active {
+            color: var(--accent-acid);
+        }
+        
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: -4px;
+            left: 0;
+            width: 100%;
+            height: 1px;
+            background: var(--accent-acid);
+        }
 
-    @keyframes spin {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
+        /* Button: High Impact */
+        .action-btn {
+            width: 100%;
+            padding: 24px;
+            border: none;
+            background: var(--accent-acid);
+            color: #000;
+            font-family: var(--font-display);
+            font-size: 1.25rem;
+            font-weight: 800;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-top: 20px;
+            position: relative;
+            overflow: hidden;
+        }
 
-    .progress-bar-container {
-      width: 100%;
-      background-color: #2a3140;
-      height: 20px;
-      border-radius: 10px;
-      margin: 15px 0;
-      overflow: hidden;
-      display: none;
-    }
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 30px var(--accent-glow);
+        }
+        
+        .action-btn:active {
+            transform: translateY(0);
+        }
 
-    .progress-bar {
-      height: 100%;
-      background-color: #4CAF50;
-      width: 0%;
-      border-radius: 10px;
-      transition: width 0.5s;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      font-size: 12px;
-    }
+        .action-btn:disabled {
+            background: #333;
+            color: #666;
+            cursor: wait;
+            box-shadow: none;
+        }
 
-    .results {
-      margin-top: 20px;
-    }
+        /* Status */
+        .status-block {
+            margin-top: 40px;
+            display: none; /* Toggled via JS */
+        }
 
-    .media-item {
-      background-color: #2a3140;
-      padding: 12px;
-      border-radius: 8px;
-      margin-bottom: 10px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
+        .progress-line {
+            width: 100%;
+            height: 2px;
+            background: #222;
+            position: relative;
+            overflow: hidden;
+            margin-bottom: 12px;
+        }
+        
+        .progress-bar {
+            position: absolute;
+            left: 0;
+            top: 0;
+            height: 100%;
+            width: 0%;
+            background: var(--accent-acid);
+            box-shadow: 0 0 10px var(--accent-acid);
+        }
 
-    .media-item a {
-      background-color: #1da1f2;
-      color: #fff;
-      text-decoration: none;
-      padding: 6px 12px;
-      border-radius: 5px;
-    }
+        .status-text {
+            font-family: 'Courier New', monospace; /* Tech feel */
+            font-size: 0.8rem;
+            color: var(--accent-acid);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
 
-    .error {
-      color: #e74c3c;
-      text-align: center;
-      margin-top: 10px;
-    }
+        .error-toast {
+            position: absolute;
+            bottom: 40px;
+            left: 60px;
+            right: 60px;
+            background: #2b0000;
+            border-left: 4px solid #ef4444;
+            color: #fca5a5;
+            padding: 16px;
+            font-size: 0.9rem;
+            display: none;
+        }
 
-    .status {
-      text-align: center;
-      font-weight: bold;
-      margin-top: 10px;
-    }
+        /* --- RESULTS GRID --- */
+        .results-wrapper {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 40px;
+        }
+        
+        .empty-state {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            opacity: 0.2;
+        }
 
-    .pending { color: #f39c12; }
-    .downloading { color: #3498db; }
-    .completed { color: #2ecc71; }
-    .failed { color: #e74c3c; }
+        .result-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border-subtle);
+            padding: 12px;
+            opacity: 0; /* Animate in */
+            transition: border-color 0.3s, transform 0.3s;
+        }
 
-    .clear-btn {
-      margin-top: 10px;
-      background-color: #e74c3c;
-      color: white;
-      border: none;
-      padding: 8px 12px;
-      border-radius: 5px;
-      cursor: pointer;
-    }
+        .result-item:hover {
+            border-color: var(--accent-acid);
+            transform: translateY(-5px);
+        }
 
-    .clear-btn:hover {
-      background-color: #c0392b;
-    }
+        .media-view {
+            width: 100%;
+            height: 400px; /* Fixed height for consistency */
+            background: #000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+            overflow: hidden;
+        }
 
-    footer {
-      text-align: center;
-      margin-top: 50px;
-      font-size: 0.85rem;
-      color: #aaa;
-    }
+        .media-view img, .media-view video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
 
+        .item-footer {
+            padding-top: 12px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .file-name {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            font-family: monospace;
+            max-width: 60%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
 
-    body.instagram {
-      background: linear-gradient(135deg, #feda75, #fa7e1e, #d62976, #962fbf, #4f5bd5);
-    }
+        .action-group {
+            display: flex;
+            gap: 8px;
+        }
 
-    body.twitter {
-      background: linear-gradient(to bottom right, #141414, #1da1f2);
-    }
+        .icon-btn {
+            background: transparent;
+            border: 1px solid var(--border-subtle);
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s;
+            padding: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .icon-btn:hover {
+            border-color: var(--accent-acid);
+            color: var(--accent-acid);
+            background: rgba(190, 242, 100, 0.05);
+        }
 
-    body.all {
-      background: linear-gradient(to bottom right, #1a1f2b, #6f42c1);
-    }
+        .clear-btn {
+            position: absolute;
+            top: 40px;
+            right: 80px;
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-family: var(--font-ui);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            opacity: 0;
+            transition: color 0.2s;
+        }
+        
+        .clear-btn:hover { color: #fff; }
 
-    .gradient-text {
-      background: linear-gradient(45deg, #1da1f2, #4f8ef7, #4f5bd5); /* Instagram-style */
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text; /* for some non-webkit browsers */
-      color: transparent;
-    }
+        /* --- MODAL --- */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 100;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            padding: 40px;
+        }
 
-  </style>
+        .modal-content {
+            background: #000;
+            border: 1px solid var(--border-subtle);
+            width: 100%;
+            max-width: 900px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .modal-header {
+            padding: 20px 30px;
+            border-bottom: 1px solid var(--border-subtle);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-title { font-family: var(--font-display); font-size: 1.2rem; font-weight: 700; color: #fff; }
+        .close-modal { background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; transition: color 0.2s; }
+        .close-modal:hover { color: var(--accent-acid); }
+
+        .modal-body {
+            flex: 1;
+            background: #111;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden;
+            position: relative;
+            min-height: 400px;
+        }
+
+        .modal-body video, .modal-body img {
+            max-width: 100%;
+            max-height: 70vh;
+        }
+
+        .modal-footer {
+            padding: 20px 30px;
+            border-top: 1px solid var(--border-subtle);
+            display: flex;
+            justify-content: flex-end;
+            gap: 16px;
+            background: #000;
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: #fff;
+            border: 1px solid var(--border-subtle);
+            padding: 12px 24px;
+            cursor: pointer;
+            font-family: var(--font-ui);
+            font-weight: 600;
+        }
+
+        .btn-primary {
+            background: var(--accent-acid);
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            cursor: pointer;
+            font-family: var(--font-ui);
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        
+        .btn-primary:hover { box-shadow: 0 0 15px var(--accent-glow); }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            body { overflow: auto; height: auto; display: block; }
+            .app-layout { flex-direction: column; }
+            .control-panel { width: 100%; padding: 60px 24px; border-right: none; border-bottom: 1px solid var(--border-subtle); }
+            .results-panel { padding: 40px 24px; height: auto; min-height: 500px; }
+            h1 { font-size: 3.5rem; }
+            .modal-content { height: 90vh; }
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h1 class="gradient-text">Instagram & X Downloader</h1>
+    <div class="noise-overlay"></div>
 
-    <div class="instructions">
-      <!-- <p><strong>Supported platforms:</strong> Instagram and Twitter/X</p>
-      <p><strong>Naming format:</strong> username_date_number.extension</p>
-      <p><strong>How to use:</strong></p> -->
-      <h2 class="gradient-text">Quick Guide</h2>
-      <ol>
-        <li>Paste a post URL from Instagram or Twitter</li>
-        <li>Click Download and wait for processing</li>
-        <li>Download files individually when ready</li>
-      </ol>
+    <div class="app-layout">
+        <!-- LEFT: Controls -->
+        <aside class="control-panel">
+            <div class="anim-entry">
+                <h1>InstaX</h1>
+                <p class="subtitle">Universal Media Downloader</p>
+            </div>
+
+            <div class="anim-entry" style="margin-bottom: 20px;">
+                <span class="label">Platform</span>
+                <div class="tabs">
+                    <button class="tab-btn active" data-platform="all">All</button>
+                    <button class="tab-btn" data-platform="instagram">Instagram</button>
+                    <button class="tab-btn" data-platform="twitter">Twitter / X</button>
+                </div>
+            </div>
+
+            <div class="anim-entry input-group">
+                <input type="text" id="url-input" placeholder="Paste link here..." autocomplete="off">
+            </div>
+
+            <button class="action-btn anim-entry" id="download-btn">Initiate Download</button>
+
+            <div class="status-block" id="status-container">
+                <div class="progress-line">
+                    <div class="progress-bar" id="status-bar"></div>
+                </div>
+                <div class="status-text" id="status-text">INITIALIZING...</div>
+            </div>
+
+            <div class="error-toast" id="error-toast"></div>
+            
+            <footer style="margin-top: auto; opacity: 0.2; font-size: 0.7rem; font-family: monospace; padding-top: 40px;">
+                SYSTEM_VER_2.0 // INSTA_X_PROJECT
+            </footer>
+        </aside>
+
+        <!-- RIGHT: Results -->
+        <main class="results-panel">
+            <button class="clear-btn" id="clear-btn">[ CLEAR ALL ]</button>
+            
+            <div class="empty-state" id="empty-state">
+            </div>
+
+            <div class="results-wrapper" id="results-wrapper">
+                <!-- Results go here -->
+            </div>
+        </main>
     </div>
 
-    <div class="platform-toggle">
-      <button class="platform-btn active" data-platform="all">All Platforms</button>
-      <button class="platform-btn" data-platform="instagram">Instagram</button>
-      <button class="platform-btn" data-platform="twitter">Twitter/X</button>
+    <!-- CROP MODAL -->
+    <div class="modal-overlay" id="crop-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title">CROP SOURCE</div>
+                <button class="close-modal" id="close-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body">
+                <!-- Video or Image injected here -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" id="cancel-crop">CANCEL</button>
+                <button class="btn-primary" id="start-crop-selection">SELECT AREA</button>
+                <button class="btn-primary" id="apply-crop" style="display:none;">APPLY CROP</button>
+            </div>
+        </div>
     </div>
 
-    <div class="input-group">
-      <input type="text" id="url-input" placeholder="Paste Instagram or Twitter/X URL here">
-      <button id="download-btn">Download</button>
-    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // UI Refs
+            const urlInput = document.getElementById('url-input');
+            const downloadBtn = document.getElementById('download-btn');
+            const statusContainer = document.getElementById('status-container');
+            const statusBar = document.getElementById('status-bar');
+            const statusText = document.getElementById('status-text');
+            const resultsWrapper = document.getElementById('results-wrapper');
+            const emptyState = document.getElementById('empty-state');
+            const errorToast = document.getElementById('error-toast');
+            const clearBtn = document.getElementById('clear-btn');
+            const tabBtns = document.querySelectorAll('.tab-btn');
 
-    <div class="status" id="status"></div>
-    <div class="progress-bar-container" id="progress-container">
-      <div class="progress-bar" id="progress-bar">0%</div>
-    </div>
+            // Modal Refs
+            const modal = document.getElementById('crop-modal');
+            const closeModal = document.getElementById('close-modal');
+            const modalBody = document.getElementById('modal-body');
+            const startCropBtn = document.getElementById('start-crop-selection');
+            const applyCropBtn = document.getElementById('apply-crop');
+            const cancelCropBtn = document.getElementById('cancel-crop');
 
-    <div class="loader" id="loader"></div>
-    <div class="error" id="error-message"></div>
-    <div class="results" id="results"></div>
-  </div>
+            let activePlatform = 'all';
+            let currentJobId = null;
+            let pollInterval = null;
+            
+            // Cropper State
+            let cropper = null;
+            let currentVideoFile = null;
+            let currentVideoElement = null;
 
-  <footer class="gradient-text">
-    ©2025 Social Media Downloader | For personal use only
-  </footer>
+            // --- ANIMATIONS ---
+            anime({
+                targets: '.anim-entry',
+                opacity: [0, 1],
+                translateY: [20, 0],
+                delay: anime.stagger(100),
+                duration: 1200,
+                easing: 'easeOutExpo'
+            });
 
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      const urlInput = document.getElementById('url-input');
-      const downloadBtn = document.getElementById('download-btn');
-      const loader = document.getElementById('loader');
-      const errorMessage = document.getElementById('error-message');
-      const results = document.getElementById('results');
-      const status = document.getElementById('status');
-      const progressContainer = document.getElementById('progress-container');
-      const progressBar = document.getElementById('progress-bar');
-      const platformBtns = document.querySelectorAll('.platform-btn');
+            anime({
+                targets: '#empty-state',
+                opacity: [0, 0.2],
+                scale: [0.95, 1],
+                delay: 800,
+                duration: 1000
+            });
 
-      let activePlatform = 'all';
-      let currentJobId = null;
-      let jobCheckInterval = null;
-      let progressValue = 0;
+            // Tabs
+            tabBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    tabBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    activePlatform = btn.dataset.platform;
+                    
+                    const placeholders = {
+                        all: 'Paste link here...',
+                        instagram: 'Paste Instagram link...',
+                        twitter: 'Paste Twitter/X link...'
+                    };
+                    
+                    urlInput.value = '';
+                    urlInput.placeholder = placeholders[activePlatform];
+                    urlInput.focus();
+                });
+            });
 
-      platformBtns.forEach(btn => {
-        btn.addEventListener('click', function() {
-          platformBtns.forEach(b => b.classList.remove('active'));
-          this.classList.add('active');
-          activePlatform = this.getAttribute('data-platform');
+            // Text Scramble Effect Helper
+            const scrambleText = (element, finalText) => {
+                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/<>[]';
+                const originalText = finalText;
+                let iterations = 0;
+                
+                const interval = setInterval(() => {
+                    element.innerText = originalText.split('')
+                        .map((letter, index) => {
+                            if(index < iterations) return originalText[index];
+                            return chars[Math.floor(Math.random() * chars.length)];
+                        })
+                        .join('');
+                    
+                    if(iterations >= originalText.length) clearInterval(interval);
+                    iterations += 1/2; 
+                }, 30);
+            };
 
-          // Set placeholder
-          if (activePlatform === 'instagram') {
-            urlInput.placeholder = 'Paste Instagram URL here';
-          } else if (activePlatform === 'twitter') {
-            urlInput.placeholder = 'Paste Twitter/X URL here';
-          } else {
-            urlInput.placeholder = 'Paste Instagram or Twitter URL here';
-          }
+            // Download Handler
+            downloadBtn.addEventListener('click', () => {
+                const url = urlInput.value.trim();
+                if (!url) return showError('INPUT URL REQUIRED');
+                
+                if (activePlatform !== 'all') {
+                    if (activePlatform === 'instagram' && !url.includes('instagram.com')) return showError('INVALID INSTAGRAM LINK');
+                    if (activePlatform === 'twitter' && (!url.includes('twitter.com') && !url.includes('x.com'))) return showError('INVALID TWITTER LINK');
+                }
 
-          // Set body class to change background
-          document.body.className = activePlatform; // 👈 switch gradient
+                startDownload(url);
+            });
+
+            function startDownload(url) {
+                errorToast.style.display = 'none';
+                statusContainer.style.display = 'block';
+                downloadBtn.disabled = true;
+                downloadBtn.textContent = 'PROCESSING...';
+
+                scrambleText(statusText, 'CONNECTING TO SERVER...');
+                anime({ targets: statusBar, width: '10%', duration: 500, easing: 'easeOutCubic' });
+
+                fetch('/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                })
+                .then(res => res.json())
+                .then(data => {
+                    if (data.error) throw new Error(data.error);
+                    currentJobId = data.job_id;
+                    pollInterval = setInterval(checkStatus, 1000);
+                })
+                .catch(err => {
+                    resetState();
+                    showError(err.message.toUpperCase());
+                });
+            }
+
+            function checkStatus() {
+                if (!currentJobId) return;
+
+                fetch(`/job/${currentJobId}`)
+                .then(res => res.json())
+                .then(data => {
+                    if (data.status === 'downloading') {
+                        if(statusText.innerText !== 'DOWNLOADING MEDIA...') {
+                             scrambleText(statusText, 'DOWNLOADING MEDIA...');
+                        }
+                        anime({ targets: statusBar, width: '60%', duration: 1000 });
+                    } 
+                    else if (data.status === 'completed') {
+                        clearInterval(pollInterval);
+                        completeJob(data);
+                    } 
+                    else if (data.status === 'failed') {
+                        clearInterval(pollInterval);
+                        resetState();
+                        showError((data.error || 'Download failed').toUpperCase());
+                    }
+                })
+                .catch(() => {
+                    clearInterval(pollInterval);
+                    resetState();
+                    showError('NETWORK ERROR');
+                });
+            }
+
+            function completeJob(data) {
+                scrambleText(statusText, 'DOWNLOAD COMPLETE');
+                anime({ 
+                    targets: statusBar, 
+                    width: '100%', 
+                    duration: 400, 
+                    complete: () => {
+                        setTimeout(() => {
+                            statusContainer.style.display = 'none';
+                            statusBar.style.width = '0%';
+                            resetState();
+                            renderResults(data.files);
+                        }, 800);
+                    } 
+                });
+                
+                fetch(`/clear_job/${currentJobId}`, { method: 'POST' });
+            }
+
+            function renderResults(files) {
+                if (!files || !files.length) return;
+
+                anime({ targets: emptyState, opacity: 0, duration: 300, complete: () => emptyState.style.display = 'none' });
+                clearBtn.style.opacity = 1;
+
+                // Create all cards first without animating
+                const newElements = [];
+                files.forEach(file => {
+                    const el = createResultCard(file, false); // false = don't animate yet
+                    newElements.push(el);
+                });
+
+                // Stagger animate them in
+                anime({
+                    targets: newElements,
+                    opacity: [0, 1],
+                    translateY: [20, 0],
+                    delay: anime.stagger(150),
+                    easing: 'easeOutExpo'
+                });
+            }
+
+            function createResultCard(file, animate = true) {
+                const el = document.createElement('div');
+                el.className = 'result-item';
+                // Ensure opacity is 0 initially if we plan to animate
+                el.style.opacity = '0'; 
+                
+                const url = `/get_file/${file.filename}`;
+                const isVid = file.filename.match(/\.(mp4|mov|webm)$/i);
+
+                let mediaHtml = isVid 
+                    ? `<video src="${url}" controls autoplay muted loop playsinline></video>` 
+                    : `<img src="${url}">`;
+
+                let actionHtml = '';
+                if(isVid) {
+                    actionHtml = `
+                        <button class="icon-btn crop-trigger" data-filename="${file.filename}" title="CROP">
+                             <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 14v4a2 2 0 002 2h4m8-20v4m0 0H6a2 2 0 00-2 2v8m8-10h8a2 2 0 012 2v8a2 2 0 01-2 2h-4"></path></svg>
+                        </button>
+                    `;
+                }
+
+                // Add Download Icon to actionHtml
+                 actionHtml += `
+                    <a href="${url}" download class="icon-btn" title="SAVE">
+                        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    </a>
+                `;
+
+                el.innerHTML = `
+                    <div class="media-view">
+                        ${mediaHtml}
+                    </div>
+                    <div class="item-footer">
+                        <span class="file-name">${file.filename}</span>
+                        <div class="action-group">
+                            ${actionHtml}
+                        </div>
+                    </div>
+                `;
+                
+                resultsWrapper.insertBefore(el, resultsWrapper.firstChild);
+
+                // Bind Crop Event
+                const cropBtn = el.querySelector('.crop-trigger');
+                if(cropBtn) {
+                    cropBtn.addEventListener('click', () => openCropModal(file.filename, url));
+                }
+
+                if (animate) {
+                    anime({
+                        targets: el,
+                        opacity: [0, 1],
+                        translateY: [20, 0],
+                        duration: 600,
+                        easing: 'easeOutExpo'
+                    });
+                }
+
+                return el;
+            }
+
+            // --- CROP LOGIC ---
+            function openCropModal(filename, url) {
+                currentVideoFile = filename;
+                modal.style.display = 'flex';
+                anime({ targets: modal, opacity: [0, 1], duration: 300 });
+
+                modalBody.innerHTML = `<video id="crop-preview-video" src="${url}" controls style="max-height:60vh; width:auto;"></video>`;
+                currentVideoElement = document.getElementById('crop-preview-video');
+                
+                startCropBtn.style.display = 'block';
+                applyCropBtn.style.display = 'none';
+                
+                if(cropper) { cropper.destroy(); cropper = null; }
+            }
+
+            startCropBtn.addEventListener('click', () => {
+                if(!currentVideoElement) return;
+                currentVideoElement.pause();
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = currentVideoElement.videoWidth;
+                canvas.height = currentVideoElement.videoHeight;
+                
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(currentVideoElement, 0, 0, canvas.width, canvas.height);
+                
+                const imgData = canvas.toDataURL('image/jpeg');
+                modalBody.innerHTML = `<img id="crop-image-target" src="${imgData}" style="max-width:100%; display:block;">`;
+                
+                const imgTarget = document.getElementById('crop-image-target');
+                cropper = new Cropper(imgTarget, {
+                    viewMode: 1,
+                    zoomable: true,
+                    responsive: true,
+                    background: false
+                });
+                
+                startCropBtn.style.display = 'none';
+                applyCropBtn.style.display = 'block';
+            });
+
+            applyCropBtn.addEventListener('click', () => {
+                if(!cropper) return;
+                
+                const data = cropper.getData(true);
+                applyCropBtn.textContent = 'CROPPING...';
+                applyCropBtn.disabled = true;
+                
+                fetch('/crop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        filename: currentVideoFile,
+                        x: data.x,
+                        y: data.y,
+                        width: data.width,
+                        height: data.height
+                    })
+                })
+                .then(res => res.json())
+                .then(result => {
+                    applyCropBtn.textContent = 'APPLY CROP';
+                    applyCropBtn.disabled = false;
+                    
+                    if(result.error) {
+                        alert('Crop failed: ' + result.error);
+                    } else {
+                        closeCropModal();
+                        createResultCard({ filename: result.filename });
+                        setTimeout(() => {
+                            const newCard = resultsWrapper.firstElementChild;
+                            if(newCard) {
+                                newCard.style.borderColor = '#bef264';
+                            }
+                        }, 200);
+                    }
+                })
+                .catch(err => {
+                    alert('Error: ' + err);
+                    applyCropBtn.textContent = 'APPLY CROP';
+                    applyCropBtn.disabled = false;
+                });
+            });
+
+            function closeCropModal() {
+                anime({ 
+                    targets: modal, 
+                    opacity: 0, 
+                    duration: 300, 
+                    complete: () => {
+                        modal.style.display = 'none';
+                        if(cropper) { cropper.destroy(); cropper = null; }
+                        modalBody.innerHTML = '';
+                    } 
+                });
+            }
+
+            closeModal.addEventListener('click', closeCropModal);
+            cancelCropBtn.addEventListener('click', closeCropModal);
+
+            // Clear Handler
+            clearBtn.addEventListener('click', () => {
+                // Call backend cleanup
+                fetch('/cleanup_session', { method: 'POST' });
+
+                anime({
+                    targets: '.result-item',
+                    opacity: 0,
+                    scale: 0.9,
+                    duration: 300,
+                    easing: 'easeInBack',
+                    complete: () => {
+                        resultsWrapper.innerHTML = '';
+                        emptyState.style.display = 'block';
+                        anime({ targets: emptyState, opacity: 0.2, scale: 1 });
+                        clearBtn.style.opacity = 0;
+                    }
+                });
+            });
+
+            // Cleanup on page refresh/close
+            window.addEventListener('beforeunload', () => {
+                fetch('/cleanup_session', { 
+                    method: 'POST',
+                    keepalive: true,
+                    headers: { 'Content-Type': 'application/json' }
+                });
+            });
+
+            function resetState() {
+                downloadBtn.disabled = false;
+                downloadBtn.textContent = 'INITIATE DOWNLOAD';
+            }
+
+            function showError(msg) {
+                errorToast.textContent = msg;
+                errorToast.style.display = 'block';
+                anime({
+                    targets: errorToast,
+                    translateY: [20, 0],
+                    opacity: [0, 1],
+                    duration: 400
+                });
+                
+                setTimeout(() => {
+                    anime({
+                        targets: errorToast,
+                        opacity: 0,
+                        complete: () => errorToast.style.display = 'none'
+                    });
+                }, 4000);
+            }
         });
-      });
-
-      downloadBtn.addEventListener('click', function() {
-        const url = urlInput.value.trim();
-
-        if (!url) return showError('Please enter a URL');
-
-        if (activePlatform === 'instagram' && !url.includes('instagram.com')) {
-          return showError('Please enter a valid Instagram URL');
-        }
-
-        if (activePlatform === 'twitter' && !url.includes('twitter.com') && !url.includes('x.com')) {
-          return showError('Please enter a valid Twitter/X URL');
-        }
-
-        if (activePlatform === 'all' && !url.includes('instagram.com') && !url.includes('twitter.com') && !url.includes('x.com')) {
-          return showError('Please enter a valid Instagram or Twitter/X URL');
-        }
-
-        results.innerHTML = '';
-        errorMessage.textContent = '';
-        status.textContent = '';
-        status.className = 'status';
-
-        if (jobCheckInterval) clearInterval(jobCheckInterval);
-
-        progressValue = 0;
-        progressBar.style.width = '0%';
-        progressBar.textContent = '0%';
-        progressContainer.style.display = 'block';
-        loader.style.display = 'block';
-
-        fetch('/download', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url: url }),
-        })
-        .then(response => response.json())
-        .then(data => {
-          if (data.error) {
-            showError(data.error);
-            hideProgress();
-            return;
-          }
-
-          if (data.job_id) {
-            currentJobId = data.job_id;
-            status.textContent = 'Job started: Preparing to download...';
-            status.className = 'status pending';
-            progressValue = 10;
-            updateProgressBar();
-            jobCheckInterval = setInterval(checkJobStatus, 1000);
-          }
-        })
-        .catch(error => {
-          loader.style.display = 'none';
-          showError('An error occurred. Please try again.');
-          hideProgress();
-          console.error('Error:', error);
-        });
-      });
-
-      function checkJobStatus() {
-        if (!currentJobId) return;
-
-        fetch(`/job/${currentJobId}`)
-        .then(response => response.json())
-        .then(data => {
-          if (data.error) {
-            clearInterval(jobCheckInterval);
-            showError(data.error);
-            hideProgress();
-            return;
-          }
-
-          if (data.status === 'pending') {
-            status.textContent = 'Pending: Waiting for download to begin...';
-            status.className = 'status pending';
-            progressValue = Math.min(30, progressValue + 2);
-          } else if (data.status === 'downloading') {
-            status.textContent = 'Downloading media...';
-            status.className = 'status downloading';
-            progressValue = Math.min(70, progressValue + 4);
-          } else if (data.status === 'completed') {
-            clearInterval(jobCheckInterval);
-            loader.style.display = 'none';
-            status.textContent = 'Download completed successfully!';
-            status.className = 'status completed';
-            progressValue = 100;
-            updateProgressBar();
-            displayResults(data);
-            setTimeout(() => {
-              fetch(`/clear_job/${currentJobId}`, { method: 'POST' });
-            }, 5000);
-          } else if (data.status === 'failed') {
-            clearInterval(jobCheckInterval);
-            showError(data.error || 'Download failed');
-            status.textContent = 'Download failed';
-            status.className = 'status failed';
-            hideProgress();
-          }
-
-          updateProgressBar();
-        })
-        .catch(console.error);
-      }
-
-      function showError(message) {
-        errorMessage.textContent = message;
-        loader.style.display = 'none';
-      }
-
-      function hideProgress() {
-        progressContainer.style.display = 'none';
-      }
-
-      function updateProgressBar() {
-        progressBar.style.width = progressValue + '%';
-        progressBar.textContent = progressValue + '%';
-      }
-
-      function displayResults(data) {
-        if (!data.files || data.files.length === 0) return;
-
-        results.innerHTML = '<h3>Downloaded Files:</h3>';
-        data.files.forEach(file => {
-          const mediaItem = document.createElement('div');
-          mediaItem.className = 'media-item';
-
-          const fileUrl = `/get_file/${file.filename}`;
-
-          // If it's an image (jpg, jpeg, png, gif)
-          if (file.filename.match(/\.(jpg|jpeg|png|gif)$/i)) {
-            const img = document.createElement('img');
-            img.src = fileUrl;
-            img.alt = `Preview of ${file.filename}`;
-            img.style.maxWidth = '200px'; // Set a max width for preview
-            img.style.marginRight = '10px'; // Space between image and filename
-            mediaItem.appendChild(img);
-          }
-          // If it's a video (mp4, mov, webm)
-          else if (file.filename.match(/\.(mp4|mov|webm)$/i)) {
-            const video = document.createElement('video');
-            video.src = fileUrl;
-            video.controls = true;
-            video.style.maxWidth = '300px'; // Set a max width for video preview
-            video.style.marginRight = '10px'; // Space between video and filename
-            mediaItem.appendChild(video);
-          }
-
-          // Filename and download link
-          mediaItem.innerHTML += `<span>${file.filename}</span><a href="${fileUrl}" download>Download</a>`;
-  
-          results.appendChild(mediaItem);
-        });
-
-        const clearBtn = document.createElement('button');
-        clearBtn.className = 'clear-btn';
-        clearBtn.textContent = 'Clear Results';
-        clearBtn.onclick = () => {
-          results.innerHTML = '';
-          status.textContent = '';
-          status.className = 'status';
-          hideProgress();
-        };
-        results.appendChild(clearBtn);
-      }
-    });
-  </script>
+    </script>
 </body>
 </html>
