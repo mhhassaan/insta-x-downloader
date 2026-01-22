@@ -308,19 +308,24 @@ def download():
         'timestamp': datetime.now().isoformat()
     }
     
-    # Start download in background thread
-    if 'instagram.com' in url:
-        thread = threading.Thread(target=download_instagram, args=(url, job_id))
-        thread.daemon = True
-        thread.start()
-    elif 'twitter.com' in url or 'x.com' in url:
-        thread = threading.Thread(target=download_twitter, args=(url, job_id))
-        thread.daemon = True
-        thread.start()
-    else:
-        return jsonify({"error": "URL must be from Instagram or Twitter"})
+    # Run download SYNCHRONOUSLY (blocking) to prevent Vercel freezing background threads
+    try:
+        if 'instagram.com' in url:
+            download_instagram(url, job_id)
+        elif 'twitter.com' in url or 'x.com' in url:
+            download_twitter(url, job_id)
+        else:
+            return jsonify({"error": "URL must be from Instagram or Twitter"})
+    except Exception as e:
+        logger.error(f"Download failed with exception: {e}")
+        background_jobs[job_id]['status'] = 'failed'
+        background_jobs[job_id]['error'] = str(e)
+
+    # Return the current status (should be 'completed' or 'failed' by now)
+    job_info = background_jobs[job_id]
     
-    return jsonify({"job_id": job_id, "status": "pending"})
+    # Return 200 even if failed, frontend handles the status
+    return jsonify(job_info)
 
 @app.route('/job/<job_id>', methods=['GET'])
 def check_job(job_id):

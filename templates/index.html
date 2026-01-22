@@ -664,9 +664,20 @@
                 })
                 .then(res => res.json())
                 .then(data => {
-                    if (data.error) throw new Error(data.error);
-                    currentJobId = data.job_id;
-                    pollInterval = setInterval(checkStatus, 1000);
+                    if (data.error && !data.status) throw new Error(data.error);
+                    
+                    currentJobId = data.job_id || 'sync_job'; // Fallback if ID missing
+                    
+                    // Check if already completed (Synchronous backend)
+                    if (data.status === 'completed') {
+                        completeJob(data);
+                    } else if (data.status === 'failed') {
+                        resetState();
+                        showError((data.error || 'Download failed').toUpperCase());
+                    } else {
+                        // Still pending? Fallback to polling
+                        pollInterval = setInterval(checkStatus, 1000);
+                    }
                 })
                 .catch(err => {
                     resetState();
