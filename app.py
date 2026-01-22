@@ -12,18 +12,20 @@ import logging
 import threading
 import time
 import instaloader
-import static_ffmpeg
+# Only use static_ffmpeg if NOT on Vercel
+if not os.environ.get('VERCEL'):
+    try:
+        import static_ffmpeg
+        # Initialize static_ffmpeg to ensure binaries are in path
+        static_ffmpeg.add_paths()
+    except Exception as e:
+        # Just log warning, don't crash app if local ffmpeg setup fails
+        logging.getLogger(__name__).warning(f"Failed to initialize static_ffmpeg: {e}")
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
-
-# Initialize static_ffmpeg to ensure binaries are in path
-try:
-    static_ffmpeg.add_paths()
-except Exception as e:
-    logger.error(f"Failed to initialize static_ffmpeg: {e}")
 
 app = Flask(__name__)
 
