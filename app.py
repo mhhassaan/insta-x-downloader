@@ -466,7 +466,10 @@ def crop_video():
         '-y', # Overwrite output files without asking
         '-i', input_path,
         '-vf', filter_str,
-        '-c:a', 'copy', # Copy audio stream without re-encoding
+        '-c:v', 'libx264',      # Force H.264 video codec
+        '-pix_fmt', 'yuv420p',  # Ensure browser-compatible pixel format
+        '-c:a', 'aac',          # Re-encode audio to AAC for max compatibility
+        '-movflags', '+faststart', # Move metadata to start for web streaming
         '-preset', 'ultrafast', # Optimize for speed
         output_path
     ]
