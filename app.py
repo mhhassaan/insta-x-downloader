@@ -467,6 +467,7 @@ def crop_video():
         '-i', input_path,
         '-vf', filter_str,
         '-c:a', 'copy', # Copy audio stream without re-encoding
+        '-preset', 'ultrafast', # Optimize for speed
         output_path
     ]
     
