@@ -42,24 +42,52 @@ background_jobs = {}
 # Store all generated files for session cleanup
 generated_files = set()
 
+import stat
+
 # Configure FFmpeg Path
 def get_ffmpeg_path():
-    # 1. Check system path (including what static_ffmpeg might have added)
+    # 1. Check system path
     system_path = shutil.which('ffmpeg')
     if system_path:
         return system_path
     
-    # 2. Check local 'bin' directory (common pattern for Vercel/serverless)
-    # We check both 'ffmpeg' (Linux/Mac) and 'ffmpeg.exe' (Windows)
+    # 2. Check local 'bin' directory
     local_bin_dir = os.path.join(os.getcwd(), 'bin')
     
-    local_bin = os.path.join(local_bin_dir, 'ffmpeg')
-    if os.path.exists(local_bin): # Checks execute permission implicitly on unix if we try to run it, but explicit check is good
-        return local_bin
-        
-    local_bin_exe = os.path.join(local_bin_dir, 'ffmpeg.exe')
-    if os.path.exists(local_bin_exe):
-        return local_bin_exe
+    # Potential candidates
+    candidates = [
+        os.path.join(local_bin_dir, 'ffmpeg'),      # Linux/Mac
+        os.path.join(local_bin_dir, 'ffmpeg.exe')   # Windows
+    ]
+    
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            # If on Linux/Posix, ensure it's executable
+            if os.name == 'posix':
+                if os.access(candidate, os.X_OK):
+                    return candidate
+                else:
+                    # It exists but isn't executable (likely Git/Windows permission issue)
+                    # We cannot chmod in /var/task (Read-only), so copy to /tmp
+                    try:
+                        logger.info(f"Found ffmpeg at {candidate} but valid permissions missing. Copying to /tmp...")
+                        tmp_ffmpeg = os.path.join(tempfile.gettempdir(), 'ffmpeg_exec')
+                        
+                        # Only copy if not already there or if we want to ensure freshness
+                        if not os.path.exists(tmp_ffmpeg):
+                            shutil.copy2(candidate, tmp_ffmpeg)
+                            # Add execute permission
+                            st = os.stat(tmp_ffmpeg)
+                            os.chmod(tmp_ffmpeg, st.st_mode | stat.S_IEXEC)
+                            logger.info(f"Copied ffmpeg to {tmp_ffmpeg} and made executable")
+                        
+                        return tmp_ffmpeg
+                    except Exception as e:
+                        logger.error(f"Failed to setup ffmpeg in /tmp: {e}")
+                        # Fallback to original, might fail but worth a shot
+                        return candidate
+            else:
+                return candidate
 
     return None
 
