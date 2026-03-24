@@ -1,5 +1,6 @@
 # app.py
-from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for, after_this_request
+from flask import Flask, render_template, request, jsonify, send_from_directory, redirect, url_for, after_this_request
+from flask_socketio import SocketIO, emit
 import os
 import yt_dlp as ytdlp
 from datetime import datetime
@@ -12,13 +13,16 @@ import logging
 import threading
 import time
 import instaloader
+import stat
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG, 
-                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+app.config['SECRET_KEY'] = 'instax_secret_key_2026'
+# Using default async_mode (threading) for best local compatibility on Windows
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Create directories if they don't exist
 if os.environ.get('VERCEL'):
@@ -33,453 +37,223 @@ background_jobs = {}
 # Store all generated files for session cleanup
 generated_files = set()
 
-import stat
+def log_to_socket(job_id, message, type='info'):
+    """Emit a log message to the frontend console via Socket.IO"""
+    socketio.emit('system_log', {
+        'job_id': job_id,
+        'message': message,
+        'type': type
+    })
+
+def get_file_size(path):
+    """Get formatted file size"""
+    try:
+        size = os.path.getsize(path)
+        for unit in ['B', 'KB', 'MB', 'GB']:
+            if size < 1024.0:
+                return f"{size:.2f} {unit}"
+            size /= 1024.0
+    except:
+        return "N/A"
 
 # Configure FFmpeg Path
 def get_ffmpeg_path():
-    # 1. Check system path
     system_path = shutil.which('ffmpeg')
-    if system_path:
-        return system_path
-    
-    # 2. Check local 'bin' directory
+    if system_path: return system_path
     local_bin_dir = os.path.join(os.getcwd(), 'bin')
-    
-    # Potential candidates
-    candidates = [
-        os.path.join(local_bin_dir, 'ffmpeg'),      # Linux/Mac
-        os.path.join(local_bin_dir, 'ffmpeg.exe')   # Windows
-    ]
-    
+    candidates = [os.path.join(local_bin_dir, 'ffmpeg'), os.path.join(local_bin_dir, 'ffmpeg.exe')]
     for candidate in candidates:
-        if os.path.exists(candidate):
-            # If on Linux/Posix, ensure it's executable
-            if os.name == 'posix':
-                if os.access(candidate, os.X_OK):
-                    return candidate
-                else:
-                    # It exists but isn't executable (likely Git/Windows permission issue)
-                    # We cannot chmod in /var/task (Read-only), so copy to /tmp
-                    try:
-                        logger.info(f"Found ffmpeg at {candidate} but valid permissions missing. Copying to /tmp...")
-                        tmp_ffmpeg = os.path.join(tempfile.gettempdir(), 'ffmpeg_exec')
-                        
-                        # Only copy if not already there or if we want to ensure freshness
-                        if not os.path.exists(tmp_ffmpeg):
-                            shutil.copy2(candidate, tmp_ffmpeg)
-                            # Add execute permission
-                            st = os.stat(tmp_ffmpeg)
-                            os.chmod(tmp_ffmpeg, st.st_mode | stat.S_IEXEC)
-                            logger.info(f"Copied ffmpeg to {tmp_ffmpeg} and made executable")
-                        
-                        return tmp_ffmpeg
-                    except Exception as e:
-                        logger.error(f"Failed to setup ffmpeg in /tmp: {e}")
-                        # Fallback to original, might fail but worth a shot
-                        return candidate
-            else:
-                return candidate
-
+        if os.path.exists(candidate): return candidate
     return None
 
 FFMPEG_PATH = get_ffmpeg_path()
 
-# Startup Check for FFmpeg
-if not FFMPEG_PATH:
-    logger.warning("CRITICAL: 'ffmpeg' command not found. Cropping and some downloads may fail.")
-else:
-    logger.info(f"FFmpeg found at: {FFMPEG_PATH}")
-
 def clean_filename(filename):
-    """Clean filename to ensure it's valid for the filesystem"""
-    # Replace invalid characters with underscores
     cleaned = re.sub(r'[\\/*?:\"<>|]', '_', filename)
-    # Remove extra whitespace
-    cleaned = ' '.join(cleaned.split())
-    return cleaned
+    return ' '.join(cleaned.split())
 
 def track_file(filename):
-    """Add filename to the tracking set"""
     generated_files.add(filename)
 
 def download_instagram(url, job_id):
-    """Download media from Instagram using instaloader Python library"""
     try:
-        import instaloader
-        
-        logger.info(f"Processing Instagram URL: {url}")
-        
-        # Create a temporary directory for instaloader output
+        log_to_socket(job_id, "ESTABLISHING CONNECTION: instagram.com", "info")
         temp_dir = tempfile.mkdtemp()
         job_info = background_jobs[job_id]
         job_info['status'] = 'downloading'
-        
-        # Extract post shortcode from URL
+
         shortcode_match = re.search(r'instagram\.com/p/([^/]+)', url) or re.search(r'instagram\.com/reel/([^/]+)', url)
-        
         if not shortcode_match:
+            log_to_socket(job_id, "ERROR: INVALID POST ID", "error")
             job_info['status'] = 'failed'
-            job_info['error'] = "Could not extract post ID from URL"
-            logger.error("Could not extract post ID from Instagram URL")
             return
-        
-        shortcode = shortcode_match.group(1)
-        # Remove trailing slash if present
-        shortcode = shortcode.rstrip('/')
-        logger.info(f"Instagram post ID: {shortcode}")
-        
-        # Create instaloader instance
-        L = instaloader.Instaloader(
-            dirname_pattern=temp_dir,
-            download_videos=True,
-            download_video_thumbnails=False,
-            download_geotags=False,
-            download_comments=False,
-            save_metadata=False,
-            quiet=True
-        )
-        
-        # Optional: Login (if needed)
-        # L.login("your_username", "your_password")
-        
-        # Download the post
+
+        shortcode = shortcode_match.group(1).rstrip('/')
+        log_to_socket(job_id, f"METADATA EXTRACTED: ID {shortcode}", "acid")
+
+        L = instaloader.Instaloader(dirname_pattern=temp_dir, download_videos=True, quiet=True)
         post = instaloader.Post.from_shortcode(L.context, shortcode)
-        L.download_post(post, target=temp_dir)
-        
-        # Find all files in the temp directory
-        downloaded_files = []
         username = post.owner_username
+        log_to_socket(job_id, f"SOURCE IDENTIFIED: @{username.upper()}", "acid")
         
+        log_to_socket(job_id, "EXTRACTING RESOURCES...", "info")
+        L.download_post(post, target=temp_dir)
+
+        # Filter files: If a video exists for an ID, skip the JPG (thumbnail) for that same ID
+        all_files = []
         for root, _, files in os.walk(temp_dir):
             for file in files:
                 if file.endswith(('.jpg', '.mp4', '.webp')):
-                    file_path = os.path.join(root, file)
-                    downloaded_files.append(file_path)
+                    all_files.append(os.path.join(root, file))
         
-        if not downloaded_files:
-            logger.error("No media files downloaded from Instagram")
-            job_info['status'] = 'failed'
-            job_info['error'] = "No media files found in the Instagram post"
-            return
+        # Group by base name (instaloader usually uses the same base name for video and its thumb)
+        # e.g. 2024-03-19_12-00-00_UTC.mp4 and 2024-03-19_12-00-00_UTC.jpg
+        video_bases = {os.path.splitext(os.path.basename(f))[0] for f in all_files if f.endswith('.mp4')}
         
-        # If we couldn't extract username, use a default
-        if not username:
-            username = "instagram_user"
-        
-        # Move files to downloads directory with proper naming
+        downloaded_files = []
+        for f in all_files:
+            base = os.path.splitext(os.path.basename(f))[0]
+            if f.endswith('.jpg') and base in video_bases:
+                continue # Skip thumbnail if we have the video
+            downloaded_files.append(f)
+
         current_date = datetime.now().strftime("%Y%m%d")
         result_files = []
-        
         for i, file_path in enumerate(downloaded_files):
-            # Get file extension
             _, ext = os.path.splitext(file_path)
-            
-            # Create new filename: username_date_number.ext
             new_filename = f"{clean_filename(username)}_{current_date}_{i+1}{ext}"
             new_path = os.path.join(DOWNLOAD_DIR, new_filename)
-            
-            # Copy the file (using copy2 to preserve metadata)
             shutil.copy2(file_path, new_path)
-            logger.info(f"Saved Instagram media as: {new_filename}")
-            
-            result_files.append({"filename": new_filename, "path": new_path})
+            size = get_file_size(new_path)
+            log_to_socket(job_id, f"SAVED: {new_filename} ({size})", "acid")
+            result_files.append({"filename": new_filename})
             track_file(new_filename)
-        
-        # Update job info
+
         job_info['status'] = 'completed'
         job_info['files'] = result_files
-        job_info['username'] = username
-        
-        # Clean up temporary directory
         shutil.rmtree(temp_dir)
-        
     except Exception as e:
-        logger.error(f"Error downloading from Instagram: {str(e)}")
-        job_info = background_jobs.get(job_id)
-        if job_info:
-            job_info['status'] = 'failed'
-            job_info['error'] = f"Error: {str(e)}"
-
+        log_to_socket(job_id, f"CRITICAL FAILURE: {str(e)}", "error")
+        if job_id in background_jobs: background_jobs[job_id]['status'] = 'failed'
 
 def download_twitter(url, job_id):
-    """Download media from Twitter using yt-dlp library"""
     try:
-        # Check if the URL is None or invalid
-        if not url:
-            logger.error("Invalid or None URL provided.")
-            raise ValueError("Invalid URL")
-
-        logger.info(f"Processing Twitter URL: {url}")
-        
-        # Create a temporary directory for yt-dlp output
+        log_to_socket(job_id, "ESTABLISHING CONNECTION: x.com", "info")
         temp_dir = tempfile.mkdtemp()
         job_info = background_jobs[job_id]
         job_info['status'] = 'downloading'
-        
-        # Extract username from URL if possible
+
         username_match = re.search(r'twitter\.com/([^/]+)', url) or re.search(r'x\.com/([^/]+)', url)
         username = username_match.group(1) if username_match else "twitter_user"
-        
-        if username in ['i', 'search', 'hashtag', 'explore']:
-            username = "twitter_user"  # Use generic name for non-profile URLs
-        
-        logger.info(f"Twitter username: {username}")
-        
-        # Prepare output template for yt-dlp
-        current_date = datetime.now().strftime("%Y%m%d")
+        log_to_socket(job_id, f"METADATA EXTRACTED: SOURCE @{username.upper()}", "acid")
+
         output_template = os.path.join(temp_dir, f"%(id)s.%(ext)s")
-        
-        # yt-dlp options for downloading
+        # Ensure we only download the best video format and skip others
         ydl_opts = {
-            'outtmpl': output_template,
-            'quiet': True,
-            'no_warnings': True,
+            'outtmpl': output_template, 
+            'quiet': True, 
             'noplaylist': True,
+            'format': 'bestvideo+bestaudio/best', # Merge best video and audio
+            'writethumbnail': False # Explicitly disable thumbnails to avoid duplicates
         }
-        
-        if FFMPEG_PATH:
-            ydl_opts['ffmpeg_location'] = FFMPEG_PATH
+        if FFMPEG_PATH: ydl_opts['ffmpeg_location'] = FFMPEG_PATH
 
-        # Create a yt-dlp object
+        log_to_socket(job_id, "EXTRACTING RESOURCES...", "info")
         with ytdlp.YoutubeDL(ydl_opts) as ydl:
-            logger.debug(f"Downloading media from URL: {url}")
-            try:
-                info_dict = ydl.extract_info(url, download=True)
-            except Exception as e:
-                logger.error(f"Error extracting info from URL: {str(e)}")
-                raise e
+            ydl.extract_info(url, download=True)
 
-        # Check if info_dict is None or doesn't contain the necessary data
-        if not info_dict:
-            logger.error("Failed to extract information from the URL.")
-            job_info['status'] = 'failed'
-            job_info['error'] = "Failed to extract media info from the URL."
-            return
-        
-        # Find all files in the temp directory
         downloaded_files = []
         for root, _, files in os.walk(temp_dir):
             for file in files:
-                if file.endswith(('.jpg', '.mp4', '.webp', '.png', '.webm', '.gif')):
-                    file_path = os.path.join(root, file)
-                    downloaded_files.append(file_path)
-        
-        if not downloaded_files:
-            logger.error("No media files downloaded from Twitter")
-            job_info['status'] = 'failed'
-            job_info['error'] = "No media files found in the Twitter post"
-            return
-        
-        # Move files to downloads directory with proper naming
+                if file.endswith(('.mp4', '.webp', '.png', '.webm', '.jpg')):
+                    downloaded_files.append(os.path.join(root, file))
+
+        current_date = datetime.now().strftime("%Y%m%d")
         result_files = []
         for i, file_path in enumerate(downloaded_files):
-            # Get file extension
             _, ext = os.path.splitext(file_path)
-            
-            # Create new filename: username_date_number.ext
             new_filename = f"{clean_filename(username)}_{current_date}_{i+1}{ext}"
             new_path = os.path.join(DOWNLOAD_DIR, new_filename)
-            
-            # Copy the file (using copy2 to preserve metadata)
             shutil.copy2(file_path, new_path)
-            logger.info(f"Saved Twitter media as: {new_filename}")
-            
-            result_files.append({"filename": new_filename, "path": new_path})
+            size = get_file_size(new_path)
+            log_to_socket(job_id, f"SAVED: {new_filename} ({size})", "acid")
+            result_files.append({"filename": new_filename})
             track_file(new_filename)
-        
-        # Update job info
+
         job_info['status'] = 'completed'
         job_info['files'] = result_files
-        job_info['username'] = username
-        
-        # Clean up temporary directory
         shutil.rmtree(temp_dir)
-        
     except Exception as e:
-        logger.error(f"Error downloading from Twitter: {str(e)}")
-        job_info = background_jobs.get(job_id)
-        if job_info:
-            job_info['status'] = 'failed'
-            job_info['error'] = f"Error: {str(e)}"
-
+        log_to_socket(job_id, f"CRITICAL FAILURE: {str(e)}", "error")
+        if job_id in background_jobs: background_jobs[job_id]['status'] = 'failed'
 
 @app.route('/')
-def index():
-    return render_template('index.html')
+def index(): return render_template('index.html')
 
 @app.route('/download', methods=['POST'])
 def download():
     data = request.get_json()
     url = data.get('url', '')
-    
-    if not url:
-        return jsonify({"error": "No URL provided"})
-    
-    logger.info(f"Processing download request for URL: {url}")
-    
-    # Generate a job ID
+    if not url: return jsonify({"error": "No URL provided"})
     job_id = str(int(time.time() * 1000))
+    background_jobs[job_id] = {'status': 'pending', 'url': url}
     
-    # Initialize job info
-    background_jobs[job_id] = {
-        'status': 'pending',
-        'url': url,
-        'timestamp': datetime.now().isoformat()
-    }
+    # Run synchronously for Vercel compatibility, but socket will stream progress
+    if 'instagram.com' in url: download_instagram(url, job_id)
+    elif 'twitter.com' in url or 'x.com' in url: download_twitter(url, job_id)
+    else: return jsonify({"error": "Unsupported platform"})
     
-    # Run download SYNCHRONOUSLY (blocking) to prevent Vercel freezing background threads
-    try:
-        if 'instagram.com' in url:
-            download_instagram(url, job_id)
-        elif 'twitter.com' in url or 'x.com' in url:
-            download_twitter(url, job_id)
-        else:
-            return jsonify({"error": "URL must be from Instagram or Twitter"})
-    except Exception as e:
-        logger.error(f"Download failed with exception: {e}")
-        background_jobs[job_id]['status'] = 'failed'
-        background_jobs[job_id]['error'] = str(e)
-
-    # Return the current status (should be 'completed' or 'failed' by now)
-    job_info = background_jobs[job_id]
-    
-    # Return 200 even if failed, frontend handles the status
-    return jsonify(job_info)
-
-@app.route('/job/<job_id>', methods=['GET'])
-def check_job(job_id):
-    if job_id not in background_jobs:
-        return jsonify({"error": "Job not found"}), 404
-    
-    job_info = background_jobs[job_id]
-    return jsonify(job_info)
+    return jsonify(background_jobs[job_id])
 
 @app.route('/get_file/<filename>')
 def get_file(filename):
-    file_path = os.path.join(DOWNLOAD_DIR, filename)  # use /tmp
-    if os.path.exists(file_path):
-        return send_file(file_path)  # no "as_attachment", allow inline preview
-    else:
-        return jsonify({"error": "File not found"}), 404
-
-
-import io
-
-@app.route('/download_and_delete/<filename>')
-def download_and_delete(filename):
-    file_path = os.path.join(DOWNLOAD_DIR, filename)
-    if not os.path.exists(file_path):
-        return jsonify({"error": "File not found"}), 404
-
-    try:
-        # Read file into memory
-        with open(file_path, 'rb') as f:
-            file_data = io.BytesIO(f.read())
-        
-        # Delete file from disk immediately
-        os.remove(file_path)
-        logger.info(f"Deleted file (loaded to memory): {filename}")
-        
-        # Remove from tracking set
-        if filename in generated_files:
-            generated_files.remove(filename)
-
-        # Serve from memory
-        return send_file(
-            file_data,
-            as_attachment=True,
-            download_name=filename,
-            mimetype='application/octet-stream'
-        )
-
-    except Exception as e:
-        logger.error(f"Error in download_and_delete: {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route('/clear_job/<job_id>', methods=['POST'])
-def clear_job(job_id):
-    if job_id in background_jobs:
-        del background_jobs[job_id]
-    return jsonify({"success": True})
-
-@app.route('/cleanup_session', methods=['POST'])
-def cleanup_session():
-    """Delete all files generated in this session"""
-    count = 0
-    # Create a copy to iterate while modifying
-    for filename in list(generated_files):
-        file_path = os.path.join(DOWNLOAD_DIR, filename)
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-                logger.info(f"Cleaned up file: {filename}")
-                generated_files.remove(filename)
-                count += 1
-            except OSError as e:
-                logger.error(f"Failed to cleanup {filename}: {e}")
-        else:
-            # File might have been downloaded and deleted already
-            generated_files.remove(filename)
-            
-    return jsonify({"success": True, "count": count})
+    return send_from_directory(DOWNLOAD_DIR, filename)
 
 @app.route('/crop', methods=['POST'])
 def crop_video():
     data = request.get_json()
     filename = data.get('filename')
-    x = int(data.get('x'))
-    y = int(data.get('y'))
-    w = int(data.get('width'))
-    h = int(data.get('height'))
+    x, y, w, h = int(data.get('x', 0)), int(data.get('y', 0)), int(data.get('width', 0)), int(data.get('height', 0))
+    start_time, end_time = data.get('start_time'), data.get('end_time')
     
-    if not filename:
-        return jsonify({"error": "No filename provided"}), 400
-        
-    if not FFMPEG_PATH:
-        return jsonify({"error": "FFmpeg is not available on the server."}), 501
+    job_id = "crop_" + str(int(time.time()))
+    log_to_socket(job_id, f"INITIATING PROCESSING: {filename}", "info")
 
     input_path = os.path.join(DOWNLOAD_DIR, filename)
-    if not os.path.exists(input_path):
-        return jsonify({"error": "File not found"}), 404
-        
-    # Generate output filename
     name, ext = os.path.splitext(filename)
-    output_filename = f"{name}_cropped_{int(time.time())}{ext}"
+    output_filename = f"{name}_processed_{int(time.time())}{ext}"
     output_path = os.path.join(DOWNLOAD_DIR, output_filename)
     
-    # Construct ffmpeg command
-    # crop=w:h:x:y
     filter_str = f"crop={w}:{h}:{x}:{y}"
-    
-    command = [
-        FFMPEG_PATH,
-        '-y', # Overwrite output files without asking
-        '-i', input_path,
-        '-vf', filter_str,
-        '-c:v', 'libx264',      # Force H.264 video codec
-        '-pix_fmt', 'yuv420p',  # Ensure browser-compatible pixel format
-        '-c:a', 'aac',          # Re-encode audio to AAC for max compatibility
-        '-movflags', '+faststart', # Move metadata to start for web streaming
-        '-preset', 'ultrafast', # Optimize for speed
-        output_path
-    ]
+    command = [FFMPEG_PATH, '-y']
+    if start_time: command.extend(['-ss', str(start_time)])
+    if end_time: command.extend(['-to', str(end_time)])
+    command.extend(['-i', input_path, '-vf', filter_str, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-preset', 'ultrafast', output_path])
     
     try:
-        logger.info(f"Running crop command: {' '.join(command)}")
-        result = subprocess.run(command, capture_output=True, text=True)
-        
-        if result.returncode != 0:
-            logger.error(f"FFmpeg failed: {result.stderr}")
-            return jsonify({"error": f"FFmpeg failed: {result.stderr}"}), 500
-            
-        # Track the new file
+        log_to_socket(job_id, "RUNNING FFMPEG TRANSCODE...", "info")
+        subprocess.run(command, capture_output=True, text=True)
+        size = get_file_size(output_path)
+        log_to_socket(job_id, f"PROCESSING SUCCESS: {output_filename} ({size})", "acid")
         track_file(output_filename)
         return jsonify({"success": True, "filename": output_filename})
-        
     except Exception as e:
-        logger.error(f"Error executing crop: {str(e)}")
+        log_to_socket(job_id, f"FFMPEG FAILURE: {str(e)}", "error")
         return jsonify({"error": str(e)}), 500
 
+@app.route('/cleanup_session', methods=['POST'])
+def cleanup_session():
+    for filename in list(generated_files):
+        path = os.path.join(DOWNLOAD_DIR, filename)
+        if os.path.exists(path):
+            try: os.remove(path); generated_files.remove(filename)
+            except: pass
+    return jsonify({"success": True})
+
+@app.route('/clear_job/<job_id>', methods=['POST'])
+def clear_job(job_id):
+    if job_id in background_jobs: del background_jobs[job_id]
+    return jsonify({"success": True})
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    socketio.run(app, debug=True)

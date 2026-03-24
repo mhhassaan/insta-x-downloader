@@ -4,135 +4,219 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>InstaX Downloader</title>
-    <!-- Fonts: Syne for display, Manrope for UI -->
+    <!-- Fonts: Outfit for display, Plus Jakarta Sans for UI -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600&family=Syne:wght@400;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&family=Plus+Jakarta+Sans:wght@400;500;700&display=swap" rel="stylesheet">
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css" />
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
     
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script>
+        const storedTheme = localStorage.getItem('theme');
+        const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        if (storedTheme === 'dark' || (!storedTheme && systemPrefersDark)) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+        }
+    </script>
 </head>
 <body>
-    <div class="noise-overlay"></div>
+    <div class="main-container">
+        <!-- Header -->
+        <header class="app-header anim-entry">
+            <div style="position: absolute; right: 0; top: 0; z-index: 10;">
+                <button id="theme-toggle" class="icon-btn" title="Toggle Dark Mode" style="width: 40px; height: 40px;">
+                    <svg class="moon-icon" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path></svg>
+                </button>
+            </div>
+            <h1>INSTA—X</h1>
+            <div class="badge">MEDIA EXTRACTOR</div>
+        </header>
 
-    <div class="app-layout">
-        <!-- LEFT: Controls -->
-        <aside class="control-panel">
-            <div class="anim-entry">
-                <h1>InstaX</h1>
-                <p class="subtitle">Universal Media Downloader</p>
+        <!-- Input Section -->
+        <section class="input-section anim-entry">
+            <div class="platform-toggles">
+                <button class="tab-btn active" data-platform="all">ANY</button>
+                <button class="tab-btn" data-platform="instagram">IG</button>
+                <button class="tab-btn" data-platform="twitter">X/TWT</button>
             </div>
 
-            <div class="anim-entry" style="margin-bottom: 20px;">
-                <span class="label">Platform</span>
-                <div class="tabs">
-                    <button class="tab-btn active" data-platform="all">All</button>
-                    <button class="tab-btn" data-platform="instagram">Instagram</button>
-                    <button class="tab-btn" data-platform="twitter">Twitter / X</button>
-                </div>
+            <div class="input-wrapper">
+                <input type="url" id="url-input" placeholder="HTTPS://..." autocomplete="off">
+                <button id="download-btn" class="brutal-btn">EXTRACT</button>
             </div>
+        </section>
 
-            <div class="anim-entry input-group">
-                <input type="text" id="url-input" placeholder="Paste link here..." autocomplete="off">
+        <!-- Results Section -->
+        <section class="results-section">
+            <div class="results-header anim-entry">
+                <h2>OUTPUT</h2>
+                <button id="clear-btn" class="brutal-btn-small">CLEAR</button>
             </div>
-
-            <button class="action-btn anim-entry" id="download-btn">Initiate Download</button>
-
-            <div class="status-block" id="status-container">
-                <div class="progress-line">
-                    <div class="progress-bar" id="status-bar"></div>
-                </div>
-                <div class="status-text" id="status-text">INITIALIZING...</div>
-            </div>
-
-            <div class="error-toast" id="error-toast"></div>
-            
-            <footer style="margin-top: auto; opacity: 0.2; font-size: 0.7rem; font-family: monospace; padding-top: 40px;">
-                SYSTEM_VER_2.0 // INSTA_X_PROJECT
-            </footer>
-        </aside>
-
-        <!-- RIGHT: Results -->
-        <main class="results-panel">
-            <button class="clear-btn" id="clear-btn">[ CLEAR ALL ]</button>
-            
-            <div class="empty-state" id="empty-state">
-            </div>
-
-            <div class="results-wrapper" id="results-wrapper">
+            <div id="empty-state" class="anim-entry">AWAITING INPUT...</div>
+            <div id="results-wrapper" class="results-grid">
                 <!-- Results go here -->
             </div>
-        </main>
+        </section>
     </div>
+
+    <!-- TOAST CONTAINER -->
+    <div id="toast-container"></div>
 
     <!-- CROP MODAL -->
     <div class="modal-overlay" id="crop-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <div class="modal-title">CROP SOURCE</div>
+                <div class="modal-title">EDITOR</div>
                 <button class="close-modal" id="close-modal">&times;</button>
             </div>
-            <div class="modal-body" id="modal-body">
-                <!-- Video or Image injected here -->
+            
+            <div class="modal-main-area">
+                <div class="modal-body" id="modal-body">
+                    <!-- Media injected here -->
+                </div>
+
+                <div class="crop-controls-panel" id="crop-controls" style="display:none;">
+                    <div class="control-section">
+                        <div class="control-section-title">Aspect Ratio</div>
+                        <div class="preset-grid">
+                            <button class="preset-btn active" data-ratio="NaN">Free</button>
+                            <button class="preset-btn" data-ratio="1">1:1</button>
+                            <button class="preset-btn" data-ratio="0.5625">9:16</button>
+                            <button class="preset-btn" data-ratio="1.7777">16:9</button>
+                            <button class="preset-btn" data-ratio="0.8">4:5</button>
+                        </div>
+                    </div>
+
+                    <div class="control-section">
+                        <div class="control-section-title">Trim (Seconds)</div>
+                        <div class="trim-input-group">
+                            <div class="trim-field">
+                                <label>Start</label>
+                                <input type="number" id="trim-start" value="0" step="0.1" min="0">
+                            </div>
+                            <div class="trim-field">
+                                <label>End</label>
+                                <input type="number" id="trim-end" value="" step="0.1" min="0" placeholder="Auto">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="control-section">
+                        <div class="control-section-title">Overlays</div>
+                        <button class="preset-btn" id="toggle-safe-zone" style="width:100%">TikTok Safe Zone</button>
+                    </div>
+                </div>
             </div>
+
             <div class="modal-footer">
                 <button class="btn-secondary" id="cancel-crop">CANCEL</button>
-                <button class="btn-primary" id="start-crop-selection">SELECT AREA</button>
-                <button class="btn-primary" id="apply-crop" style="display:none;">APPLY CROP</button>
+                <div class="footer-actions-right">
+                    <button class="btn-primary btn-select" id="start-crop-selection">SELECT AREA</button>
+                    <button class="btn-primary" id="apply-crop" style="display:none;">PROCESS VIDEO</button>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            // Theme Logic
+            const themeToggleBtn = document.getElementById('theme-toggle');
+            themeToggleBtn.addEventListener('click', () => {
+                const currentTheme = document.documentElement.getAttribute('data-theme');
+                const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', newTheme);
+                localStorage.setItem('theme', newTheme);
+                
+                // Animate icon (optional wiggle or spin)
+                anime({
+                    targets: themeToggleBtn.querySelector('svg'),
+                    rotate: '+=360',
+                    duration: 600,
+                    easing: 'easeOutElastic(1, .6)'
+                });
+            });
+
             // UI Refs
             const urlInput = document.getElementById('url-input');
             const downloadBtn = document.getElementById('download-btn');
-            const statusContainer = document.getElementById('status-container');
-            const statusBar = document.getElementById('status-bar');
-            const statusText = document.getElementById('status-text');
             const resultsWrapper = document.getElementById('results-wrapper');
             const emptyState = document.getElementById('empty-state');
-            const errorToast = document.getElementById('error-toast');
             const clearBtn = document.getElementById('clear-btn');
             const tabBtns = document.querySelectorAll('.tab-btn');
+            const toastContainer = document.getElementById('toast-container');
 
             // Modal Refs
             const modal = document.getElementById('crop-modal');
-            const closeModal = document.getElementById('close-modal');
             const modalBody = document.getElementById('modal-body');
             const startCropBtn = document.getElementById('start-crop-selection');
             const applyCropBtn = document.getElementById('apply-crop');
+            const cropControls = document.getElementById('crop-controls');
+            const trimStart = document.getElementById('trim-start');
+            const trimEnd = document.getElementById('trim-end');
+            const closeModal = document.getElementById('close-modal');
             const cancelCropBtn = document.getElementById('cancel-crop');
+            const presetBtns = document.querySelectorAll('.preset-btn');
+            const toggleSafeZone = document.getElementById('toggle-safe-zone');
 
+            const socket = io();
             let activePlatform = 'all';
             let currentJobId = null;
-            let pollInterval = null;
             
             // Cropper State
             let cropper = null;
             let currentVideoFile = null;
             let currentVideoElement = null;
+            let isSafeZoneVisible = false;
+
+            // --- SOCKET LISTENERS ---
+            socket.on('connect', () => {
+                showToast('SYSTEM ONLINE: SOCKET CONNECTED', 'acid');
+            });
+
+            socket.on('system_log', (data) => {
+                showToast(data.message, data.type);
+            });
+
+            // --- TOAST LOGIC ---
+            function showToast(msg, type = 'info') {
+                const toast = document.createElement('div');
+                toast.className = `toast toast-${type}`;
+                toast.textContent = msg;
+                toastContainer.appendChild(toast);
+
+                anime({
+                    targets: toast,
+                    translateX: [100, 0],
+                    opacity: [0, 1],
+                    duration: 800,
+                    easing: 'easeOutElastic(1, .8)'
+                });
+
+                setTimeout(() => {
+                    anime({
+                        targets: toast,
+                        translateX: [0, 50],
+                        opacity: [1, 0],
+                        duration: 500,
+                        easing: 'easeInBack',
+                        complete: () => toast.remove()
+                    });
+                }, 4000);
+            }
 
             // --- ANIMATIONS ---
             anime({
                 targets: '.anim-entry',
+                scale: [0.5, 1],
                 opacity: [0, 1],
-                translateY: [20, 0],
-                delay: anime.stagger(100),
+                delay: anime.stagger(150),
                 duration: 1200,
-                easing: 'easeOutExpo'
-            });
-
-            anime({
-                targets: '#empty-state',
-                opacity: [0, 0.2],
-                scale: [0.95, 1],
-                delay: 800,
-                duration: 1000
+                easing: 'easeOutElastic(1, .6)'
             });
 
             // Tabs
@@ -141,59 +225,36 @@
                     tabBtns.forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
                     activePlatform = btn.dataset.platform;
-                    
-                    const placeholders = {
-                        all: 'Paste link here...',
-                        instagram: 'Paste Instagram link...',
-                        twitter: 'Paste Twitter/X link...'
-                    };
-                    
-                    urlInput.value = '';
-                    urlInput.placeholder = placeholders[activePlatform];
-                    urlInput.focus();
+                    showToast(`PLATFORM SWITCH: ${activePlatform.toUpperCase()}`);
                 });
             });
 
-            // Text Scramble Effect Helper
-            const scrambleText = (element, finalText) => {
-                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/<>[]';
-                const originalText = finalText;
-                let iterations = 0;
-                
-                const interval = setInterval(() => {
-                    element.innerText = originalText.split('')
-                        .map((letter, index) => {
-                            if(index < iterations) return originalText[index];
-                            return chars[Math.floor(Math.random() * chars.length)];
-                        })
-                        .join('');
-                    
-                    if(iterations >= originalText.length) clearInterval(interval);
-                    iterations += 1/2; 
-                }, 30);
-            };
-
             // Download Handler
-            downloadBtn.addEventListener('click', () => {
+            const handleDownload = () => {
                 const url = urlInput.value.trim();
-                if (!url) return showError('INPUT URL REQUIRED');
+                if (!url) return showToast('ERROR: INPUT URL REQUIRED', 'error');
                 
                 if (activePlatform !== 'all') {
-                    if (activePlatform === 'instagram' && !url.includes('instagram.com')) return showError('INVALID INSTAGRAM LINK');
-                    if (activePlatform === 'twitter' && (!url.includes('twitter.com') && !url.includes('x.com'))) return showError('INVALID TWITTER LINK');
+                    if (activePlatform === 'instagram' && !url.includes('instagram.com')) return showToast('ERROR: INVALID INSTAGRAM LINK', 'error');
+                    if (activePlatform === 'twitter' && (!url.includes('twitter.com') && !url.includes('x.com'))) return showToast('ERROR: INVALID X TWITTER LINK', 'error');
                 }
 
-                startDownload(url);
+                if (!downloadBtn.disabled) startDownload(url);
+            };
+
+            downloadBtn.addEventListener('click', handleDownload);
+            
+            urlInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleDownload();
+                }
             });
 
             function startDownload(url) {
-                errorToast.style.display = 'none';
-                statusContainer.style.display = 'block';
                 downloadBtn.disabled = true;
-                downloadBtn.textContent = 'PROCESSING...';
-
-                scrambleText(statusText, 'CONNECTING TO SERVER...');
-                anime({ targets: statusBar, width: '10%', duration: 500, easing: 'easeOutCubic' });
+                downloadBtn.textContent = 'EXTRACTING...';
+                showToast(`INITIATING EXTRACTION: ${url.substring(0, 30)}...`, 'acid');
 
                 fetch('/download', {
                     method: 'POST',
@@ -202,154 +263,101 @@
                 })
                 .then(res => res.json())
                 .then(data => {
-                    if (data.error && !data.status) throw new Error(data.error);
+                    if (data.error && data.status !== 'completed') {
+                        throw new Error(data.error);
+                    }
                     
-                    currentJobId = data.job_id || 'sync_job'; // Fallback if ID missing
-                    
-                    // Check if already completed (Synchronous backend)
                     if (data.status === 'completed') {
                         completeJob(data);
                     } else if (data.status === 'failed') {
                         resetState();
-                        showError((data.error || 'Download failed').toUpperCase());
-                    } else {
-                        // Still pending? Fallback to polling
-                        pollInterval = setInterval(checkStatus, 1000);
+                        showToast(`ERROR: ${data.error || 'EXTRACTION FAILED'}`, 'error');
                     }
                 })
                 .catch(err => {
                     resetState();
-                    showError(err.message.toUpperCase());
-                });
-            }
-
-            function checkStatus() {
-                if (!currentJobId) return;
-
-                fetch(`/job/${currentJobId}`)
-                .then(res => res.json())
-                .then(data => {
-                    if (data.status === 'downloading') {
-                        if(statusText.innerText !== 'DOWNLOADING MEDIA...') {
-                             scrambleText(statusText, 'DOWNLOADING MEDIA...');
-                        }
-                        anime({ targets: statusBar, width: '60%', duration: 1000 });
-                    } 
-                    else if (data.status === 'completed') {
-                        clearInterval(pollInterval);
-                        completeJob(data);
-                    } 
-                    else if (data.status === 'failed') {
-                        clearInterval(pollInterval);
-                        resetState();
-                        showError((data.error || 'Download failed').toUpperCase());
-                    }
-                })
-                .catch(() => {
-                    clearInterval(pollInterval);
-                    resetState();
-                    showError('NETWORK ERROR');
+                    showToast(`CRITICAL FAILURE: ${err.message}`, 'error');
                 });
             }
 
             function completeJob(data) {
-                scrambleText(statusText, 'DOWNLOAD COMPLETE');
-                anime({ 
-                    targets: statusBar, 
-                    width: '100%', 
-                    duration: 400, 
-                    complete: () => {
-                        setTimeout(() => {
-                            statusContainer.style.display = 'none';
-                            statusBar.style.width = '0%';
-                            resetState();
-                            renderResults(data.files);
-                        }, 800);
-                    } 
-                });
-                
-                fetch(`/clear_job/${currentJobId}`, { method: 'POST' });
+                showToast(`EXTRACTION SUCCESS: ${data.files.length} FILES LOADED`, 'acid');
+                resetState();
+                renderResults(data.files);
             }
 
             function renderResults(files) {
                 if (!files || !files.length) return;
+                emptyState.style.display = 'none';
+                clearBtn.style.display = 'block';
+                setTimeout(() => clearBtn.style.opacity = 1, 10);
 
-                anime({ targets: emptyState, opacity: 0, duration: 300, complete: () => emptyState.style.display = 'none' });
-                clearBtn.style.opacity = 1;
-
-                // Create all cards first without animating
                 const newElements = [];
                 files.forEach(file => {
-                    const el = createResultCard(file, false); // false = don't animate yet
+                    const el = createResultCard(file, false);
                     newElements.push(el);
                 });
 
-                // Stagger animate them in
                 anime({
                     targets: newElements,
+                    scale: [0.3, 1],
                     opacity: [0, 1],
-                    translateY: [20, 0],
-                    delay: anime.stagger(150),
-                    easing: 'easeOutExpo'
+                    delay: anime.stagger(200),
+                    easing: 'easeOutElastic(1, .8)'
                 });
             }
 
             function createResultCard(file, animate = true) {
                 const el = document.createElement('div');
                 el.className = 'result-item';
-                // Ensure opacity is 0 initially if we plan to animate
                 el.style.opacity = '0'; 
                 
                 const url = `/get_file/${file.filename}`;
                 const isVid = file.filename.match(/\.(mp4|mov|webm)$/i);
 
                 let mediaHtml = isVid 
-                    ? `<video src="${url}" controls autoplay muted loop playsinline></video>` 
+                    ? `<video src="${url}" autoplay muted loop playsinline></video>` 
                     : `<img src="${url}">`;
 
-                let actionHtml = '';
-                if(isVid) {
-                    actionHtml = `
-                        <button class="icon-btn crop-trigger" data-filename="${file.filename}" title="CROP">
-                             <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 14v4a2 2 0 002 2h4m8-20v4m0 0H6a2 2 0 00-2 2v8m8-10h8a2 2 0 012 2v8a2 2 0 01-2 2h-4"></path></svg>
-                        </button>
-                    `;
-                }
-
-                // Add Download Icon to actionHtml
-                 actionHtml += `
-                    <a href="${url}" download class="icon-btn" title="SAVE">
-                        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                    </a>
+                let actionHtml = `
+                    <div class="action-group">
+                        ${isVid ? `
+                            <button class="icon-btn crop-trigger" data-filename="${file.filename}" title="EDITOR">
+                                <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4 14v4a2 2 0 002 2h4m8-20v4m0 0H6a2 2 0 00-2 2v8m8-10h8a2 2 0 012 2v8a2 2 0 01-2 2h-4"></path></svg>
+                            </button>
+                        ` : ''}
+                        <a href="${url}" download class="icon-btn" title="DOWNLOAD">
+                            <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                        </a>
+                    </div>
                 `;
 
                 el.innerHTML = `
-                    <div class="media-view">
-                        ${mediaHtml}
-                    </div>
+                    <div class="item-overlay">${isVid ? 'MP4' : 'JPEG'}</div>
+                    <div class="media-view">${mediaHtml}</div>
                     <div class="item-footer">
                         <span class="file-name">${file.filename}</span>
-                        <div class="action-group">
-                            ${actionHtml}
-                        </div>
+                        ${actionHtml}
                     </div>
                 `;
                 
                 resultsWrapper.insertBefore(el, resultsWrapper.firstChild);
 
-                // Bind Crop Event
                 const cropBtn = el.querySelector('.crop-trigger');
                 if(cropBtn) {
-                    cropBtn.addEventListener('click', () => openCropModal(file.filename, url));
+                    cropBtn.addEventListener('click', () => {
+                        showToast(`OPENING EDITOR: ${file.filename}`);
+                        openCropModal(file.filename, url);
+                    });
                 }
 
                 if (animate) {
                     anime({
                         targets: el,
+                        scale: [0.5, 1],
                         opacity: [0, 1],
-                        translateY: [20, 0],
-                        duration: 600,
-                        easing: 'easeOutExpo'
+                        duration: 1000,
+                        easing: 'easeOutElastic(1, .8)'
                     });
                 }
 
@@ -362,17 +370,35 @@
                 modal.style.display = 'flex';
                 anime({ targets: modal, opacity: [0, 1], duration: 300 });
 
-                modalBody.innerHTML = `<video id="crop-preview-video" src="${url}" controls style="max-height:60vh; width:auto;"></video>`;
+                modalBody.innerHTML = `
+                    <div class="video-container" style="position:relative; display:flex; justify-content:center; align-items:center; width:100%; height:100%;">
+                        <video id="crop-preview-video" src="${url}" controls style="max-height:100%; max-width:100%;"></video>
+                        <div class="safe-zone-overlay" id="safe-zone-overlay" style="display: ${isSafeZoneVisible ? 'block' : 'none'}">
+                            <div class="safe-zone-tiktok">
+                                <div class="sz-top"></div>
+                                <div class="sz-right"></div>
+                                <div class="sz-bottom"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
                 currentVideoElement = document.getElementById('crop-preview-video');
                 
                 startCropBtn.style.display = 'block';
                 applyCropBtn.style.display = 'none';
+                cropControls.style.display = 'none';
                 
+                // Reset trim
+                trimStart.value = 0;
+                trimEnd.value = "";
+
                 if(cropper) { cropper.destroy(); cropper = null; }
             }
 
             startCropBtn.addEventListener('click', () => {
                 if(!currentVideoElement) return;
+                
+                const currentTime = currentVideoElement.currentTime;
                 currentVideoElement.pause();
                 
                 const canvas = document.createElement('canvas');
@@ -383,25 +409,65 @@
                 ctx.drawImage(currentVideoElement, 0, 0, canvas.width, canvas.height);
                 
                 const imgData = canvas.toDataURL('image/jpeg');
-                modalBody.innerHTML = `<img id="crop-image-target" src="${imgData}" style="max-width:100%; display:block;">`;
+                modalBody.innerHTML = `
+                    <div class="crop-container" style="position:relative; width:100%; height:100%; display:flex; justify-content:center; align-items:center;">
+                        <img id="crop-image-target" src="${imgData}" style="max-width:100%; max-height:100%; display:block;">
+                        <div class="safe-zone-overlay" id="safe-zone-overlay" style="display: ${isSafeZoneVisible ? 'block' : 'none'}">
+                            <div class="safe-zone-tiktok">
+                                <div class="sz-top"></div>
+                                <div class="sz-right"></div>
+                                <div class="sz-bottom"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
                 
                 const imgTarget = document.getElementById('crop-image-target');
                 cropper = new Cropper(imgTarget, {
                     viewMode: 1,
                     zoomable: true,
                     responsive: true,
-                    background: false
+                    background: false,
+                    autoCropArea: 1
                 });
                 
                 startCropBtn.style.display = 'none';
                 applyCropBtn.style.display = 'block';
+                cropControls.style.display = 'block';
+                
+                // Set initial trim end if we can
+                if(currentVideoElement.duration) {
+                    trimEnd.value = currentVideoElement.duration.toFixed(1);
+                    trimEnd.max = currentVideoElement.duration;
+                    trimStart.max = currentVideoElement.duration;
+                }
+            });
+
+            // Preset Handlers
+            presetBtns.forEach(btn => {
+                btn.addEventListener('click', () => {
+                    presetBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    const ratio = parseFloat(btn.dataset.ratio);
+                    if(cropper) {
+                        cropper.setAspectRatio(ratio);
+                    }
+                });
+            });
+
+            // Toggle Safe Zone
+            toggleSafeZone.addEventListener('click', () => {
+                isSafeZoneVisible = !isSafeZoneVisible;
+                const overlay = document.getElementById('safe-zone-overlay');
+                if(overlay) overlay.style.display = isSafeZoneVisible ? 'block' : 'none';
+                toggleSafeZone.classList.toggle('active', isSafeZoneVisible);
             });
 
             applyCropBtn.addEventListener('click', () => {
                 if(!cropper) return;
                 
                 const data = cropper.getData(true);
-                applyCropBtn.textContent = 'CROPPING...';
+                applyCropBtn.textContent = 'PROCESSING...';
                 applyCropBtn.disabled = true;
                 
                 fetch('/crop', {
@@ -412,30 +478,27 @@
                         x: data.x,
                         y: data.y,
                         width: data.width,
-                        height: data.height
+                        height: data.height,
+                        start_time: trimStart.value || null,
+                        end_time: trimEnd.value || null
                     })
                 })
                 .then(res => res.json())
                 .then(result => {
-                    applyCropBtn.textContent = 'APPLY CROP';
+                    applyCropBtn.textContent = 'PROCESS VIDEO';
                     applyCropBtn.disabled = false;
                     
                     if(result.error) {
-                        alert('Crop failed: ' + result.error);
+                        showToast('Processing failed: ' + result.error, 'error');
                     } else {
                         closeCropModal();
                         createResultCard({ filename: result.filename });
-                        setTimeout(() => {
-                            const newCard = resultsWrapper.firstElementChild;
-                            if(newCard) {
-                                newCard.style.borderColor = '#bef264';
-                            }
-                        }, 200);
+                        showToast('VIDEO PROCESSED SUCCESSFULLY', 'acid');
                     }
                 })
                 .catch(err => {
-                    alert('Error: ' + err);
-                    applyCropBtn.textContent = 'APPLY CROP';
+                    showToast('Error: ' + err, 'error');
+                    applyCropBtn.textContent = 'PROCESS VIDEO';
                     applyCropBtn.disabled = false;
                 });
             });
@@ -449,6 +512,7 @@
                         modal.style.display = 'none';
                         if(cropper) { cropper.destroy(); cropper = null; }
                         modalBody.innerHTML = '';
+                        showToast('EDITOR CLOSED');
                     } 
                 });
             }
@@ -458,20 +522,22 @@
 
             // Clear Handler
             clearBtn.addEventListener('click', () => {
-                // Call backend cleanup
+                showToast('CLEANING WORKSPACE...', 'acid');
                 fetch('/cleanup_session', { method: 'POST' });
 
                 anime({
                     targets: '.result-item',
                     opacity: 0,
-                    scale: 0.9,
+                    translateY: 30,
                     duration: 300,
-                    easing: 'easeInBack',
+                    delay: anime.stagger(50),
+                    easing: 'easeInExpo',
                     complete: () => {
                         resultsWrapper.innerHTML = '';
                         emptyState.style.display = 'block';
-                        anime({ targets: emptyState, opacity: 0.2, scale: 1 });
                         clearBtn.style.opacity = 0;
+                        setTimeout(() => clearBtn.style.display = 'none', 300);
+                        showToast('WORKSPACE CLEANED');
                     }
                 });
             });
@@ -487,26 +553,7 @@
 
             function resetState() {
                 downloadBtn.disabled = false;
-                downloadBtn.textContent = 'INITIATE DOWNLOAD';
-            }
-
-            function showError(msg) {
-                errorToast.textContent = msg;
-                errorToast.style.display = 'block';
-                anime({
-                    targets: errorToast,
-                    translateY: [20, 0],
-                    opacity: [0, 1],
-                    duration: 400
-                });
-                
-                setTimeout(() => {
-                    anime({
-                        targets: errorToast,
-                        opacity: 0,
-                        complete: () => errorToast.style.display = 'none'
-                    });
-                }, 4000);
+                downloadBtn.textContent = 'EXTRACT';
             }
         });
     </script>
