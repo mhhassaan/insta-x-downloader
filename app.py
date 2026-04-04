@@ -110,11 +110,11 @@ def download_instagram(url, job_id):
             if post.is_video:
                 new_filename = f"{clean_filename(username)}_{current_date}_video.mp4"
                 direct_url_map[new_filename] = post.video_url
-                result_files.append({"filename": new_filename})
+                result_files.append({"filename": new_filename, "url": post.video_url})
             else:
                 new_filename = f"{clean_filename(username)}_{current_date}_image.jpg"
                 direct_url_map[new_filename] = post.url
-                result_files.append({"filename": new_filename})
+                result_files.append({"filename": new_filename, "url": post.url})
         else:
             # FULL PATH: Download to disk (for local/editing)
             log_to_socket(job_id, "EXTRACTING RESOURCES...", "info")
@@ -147,7 +147,7 @@ def download_instagram(url, job_id):
                 
                 size = get_file_size(new_path)
                 log_to_socket(job_id, f"SAVED: {new_filename} ({size})", "acid")
-                result_files.append({"filename": new_filename})
+                result_files.append({"filename": new_filename, "url": direct_url})
                 track_file(new_filename)
 
         background_jobs[job_id].update({'status': 'completed', 'files': result_files})
@@ -196,7 +196,7 @@ def download_twitter(url, job_id):
                 ext = info.get('ext', 'mp4')
                 new_filename = f"{clean_filename(username)}_{current_date}_video.{ext}"
                 direct_url_map[new_filename] = direct_url
-                result_files.append({"filename": new_filename})
+                result_files.append({"filename": new_filename, "url": direct_url})
         else:
             # FULL PATH: Download to disk
             output_template = os.path.join(temp_dir, f"%(id)s.%(ext)s")
@@ -234,7 +234,7 @@ def download_twitter(url, job_id):
                 
                 size = get_file_size(new_path)
                 log_to_socket(job_id, f"SAVED: {new_filename} ({size})", "acid")
-                result_files.append({"filename": new_filename})
+                result_files.append({"filename": new_filename, "url": direct_url})
                 track_file(new_filename)
 
         background_jobs[job_id].update({'status': 'completed', 'files': result_files})

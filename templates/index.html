@@ -352,7 +352,8 @@
                 el.className = 'result-item';
                 el.style.opacity = '0'; 
                 
-                const url = `/get_file/${file.filename}`;
+                // Use the direct URL if available (important for Vercel), fallback to local route
+                const url = file.url || `/get_file/${file.filename}`;
                 const isVid = file.filename.match(/\.(mp4|mov|webm)$/i);
 
                 let mediaHtml = isVid 
@@ -367,7 +368,7 @@
                                 <span>Edit</span>
                             </button>
                         ` : ''}
-                        <a href="${url}" download class="icon-btn" title="DOWNLOAD">
+                        <a href="${url}" download="${file.filename}" class="icon-btn" title="Download Media">
                             <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
                         </a>
                     </div>
