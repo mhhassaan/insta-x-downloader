@@ -36,6 +36,8 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 background_jobs = {}
 # Store all generated files for session cleanup
 generated_files = set()
+# Map filenames to direct source URLs for Vercel/Fallback
+direct_url_map = {}
 
 def log_to_socket(job_id, message, type='info'):
     """Emit a log message to the frontend console via Socket.IO"""
@@ -97,35 +99,56 @@ def download_instagram(url, job_id):
         username = post.owner_username
         log_to_socket(job_id, f"SOURCE IDENTIFIED: @{username.upper()}", "acid")
         
-        log_to_socket(job_id, "EXTRACTING RESOURCES...", "info")
-        L.download_post(post, target="post_data")
-
-        all_files = []
-        for root, _, files in os.walk(temp_dir):
-            for file in files:
-                if file.endswith(('.jpg', '.mp4', '.webp')):
-                    all_files.append(os.path.join(root, file))
-        
-        video_bases = {os.path.splitext(os.path.basename(f))[0] for f in all_files if f.endswith('.mp4')}
-        
-        downloaded_files = []
-        for f in all_files:
-            base = os.path.splitext(os.path.basename(f))[0]
-            if f.endswith('.jpg') and base in video_bases:
-                continue 
-            downloaded_files.append(f)
-
-        current_date = datetime.now().strftime("%Y%m%d")
+        # On Vercel, we prefer fast metadata extraction over slow full-disk downloads
+        is_vercel = os.environ.get('VERCEL')
         result_files = []
-        for i, file_path in enumerate(downloaded_files):
-            _, ext = os.path.splitext(file_path)
-            new_filename = f"{clean_filename(username)}_{current_date}_{i+1}{ext}"
-            new_path = os.path.join(DOWNLOAD_DIR, new_filename)
-            shutil.copy2(file_path, new_path)
-            size = get_file_size(new_path)
-            log_to_socket(job_id, f"SAVED: {new_filename} ({size})", "acid")
-            result_files.append({"filename": new_filename})
-            track_file(new_filename)
+        current_date = datetime.now().strftime("%Y%m%d")
+
+        if is_vercel:
+            # FAST PATH: Just get the direct URLs
+            log_to_socket(job_id, "FAST-TRACKING METADATA...", "info")
+            if post.is_video:
+                new_filename = f"{clean_filename(username)}_{current_date}_video.mp4"
+                direct_url_map[new_filename] = post.video_url
+                result_files.append({"filename": new_filename})
+            else:
+                new_filename = f"{clean_filename(username)}_{current_date}_image.jpg"
+                direct_url_map[new_filename] = post.url
+                result_files.append({"filename": new_filename})
+        else:
+            # FULL PATH: Download to disk (for local/editing)
+            log_to_socket(job_id, "EXTRACTING RESOURCES...", "info")
+            L.download_post(post, target="post_data")
+
+            all_files = []
+            for root, _, files in os.walk(temp_dir):
+                for file in files:
+                    if file.endswith(('.jpg', '.mp4', '.webp')):
+                        all_files.append(os.path.join(root, file))
+            
+            video_bases = {os.path.splitext(os.path.basename(f))[0] for f in all_files if f.endswith('.mp4')}
+            
+            downloaded_files = []
+            for f in all_files:
+                base = os.path.splitext(os.path.basename(f))[0]
+                if f.endswith('.jpg') and base in video_bases:
+                    continue 
+                downloaded_files.append(f)
+
+            for i, file_path in enumerate(downloaded_files):
+                _, ext = os.path.splitext(file_path)
+                new_filename = f"{clean_filename(username)}_{current_date}_{i+1}{ext}"
+                new_path = os.path.join(DOWNLOAD_DIR, new_filename)
+                shutil.copy2(file_path, new_path)
+                
+                # Map filename to direct source URL for redirect fallback
+                direct_url = post.video_url if ext == '.mp4' else post.url
+                direct_url_map[new_filename] = direct_url
+                
+                size = get_file_size(new_path)
+                log_to_socket(job_id, f"SAVED: {new_filename} ({size})", "acid")
+                result_files.append({"filename": new_filename})
+                track_file(new_filename)
 
         background_jobs[job_id].update({'status': 'completed', 'files': result_files})
         socketio.emit('job_completed', {"job_id": job_id, "files": result_files})
@@ -148,45 +171,71 @@ def download_twitter(url, job_id):
         username = username_match.group(1) if username_match else "twitter_user"
         log_to_socket(job_id, f"METADATA EXTRACTED: SOURCE @{username.upper()}", "acid")
 
+        is_vercel = os.environ.get('VERCEL')
+        current_date = datetime.now().strftime("%Y%m%d")
+        result_files = []
+
         def progress_hook(d):
             if d['status'] == 'downloading':
                 percent = d.get('_percent_str', '0%')
                 speed = d.get('_speed_str', 'N/A')
                 log_to_socket(job_id, f"DOWNLOADING: {percent} (at {speed})", "info")
 
-        output_template = os.path.join(temp_dir, f"%(id)s.%(ext)s")
-        ydl_opts = {
-            'outtmpl': output_template, 
-            'quiet': True, 
-            'noplaylist': True,
-            'format': 'bestvideo+bestaudio/best',
-            'writethumbnail': False,
-            'progress_hooks': [progress_hook],
-            'nocheckcertificate': True
-        }
-        if FFMPEG_PATH: ydl_opts['ffmpeg_location'] = FFMPEG_PATH
+        if is_vercel:
+            # FAST PATH: Just get the direct URL
+            log_to_socket(job_id, "FAST-TRACKING METADATA...", "info")
+            ydl_opts = {
+                'quiet': True, 
+                'noplaylist': True,
+                'format': 'best[ext=mp4]/best',
+                'nocheckcertificate': True
+            }
+            with ytdlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                direct_url = info.get('url')
+                ext = info.get('ext', 'mp4')
+                new_filename = f"{clean_filename(username)}_{current_date}_video.{ext}"
+                direct_url_map[new_filename] = direct_url
+                result_files.append({"filename": new_filename})
+        else:
+            # FULL PATH: Download to disk
+            output_template = os.path.join(temp_dir, f"%(id)s.%(ext)s")
+            ydl_opts = {
+                'outtmpl': output_template, 
+                'quiet': True, 
+                'noplaylist': True,
+                'format': 'bestvideo+bestaudio/best',
+                'writethumbnail': False,
+                'progress_hooks': [progress_hook],
+                'nocheckcertificate': True
+            }
+            if FFMPEG_PATH: ydl_opts['ffmpeg_location'] = FFMPEG_PATH
 
-        log_to_socket(job_id, "EXTRACTING RESOURCES...", "info")
-        with ytdlp.YoutubeDL(ydl_opts) as ydl:
-            ydl.extract_info(url, download=True)
+            log_to_socket(job_id, "EXTRACTING RESOURCES...", "info")
+            with ytdlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                direct_url = info.get('url')
 
-        downloaded_files = []
-        for root, _, files in os.walk(temp_dir):
-            for file in files:
-                if file.endswith(('.mp4', '.webp', '.png', '.webm', '.jpg')):
-                    downloaded_files.append(os.path.join(root, file))
+            downloaded_files = []
+            for root, _, files in os.walk(temp_dir):
+                for file in files:
+                    if file.endswith(('.mp4', '.webp', '.png', '.webm', '.jpg')):
+                        downloaded_files.append(os.path.join(root, file))
 
-        current_date = datetime.now().strftime("%Y%m%d")
-        result_files = []
-        for i, file_path in enumerate(downloaded_files):
-            _, ext = os.path.splitext(file_path)
-            new_filename = f"{clean_filename(username)}_{current_date}_{i+1}{ext}"
-            new_path = os.path.join(DOWNLOAD_DIR, new_filename)
-            shutil.copy2(file_path, new_path)
-            size = get_file_size(new_path)
-            log_to_socket(job_id, f"SAVED: {new_filename} ({size})", "acid")
-            result_files.append({"filename": new_filename})
-            track_file(new_filename)
+            for i, file_path in enumerate(downloaded_files):
+                _, ext = os.path.splitext(file_path)
+                new_filename = f"{clean_filename(username)}_{current_date}_{i+1}{ext}"
+                new_path = os.path.join(DOWNLOAD_DIR, new_filename)
+                shutil.copy2(file_path, new_path)
+                
+                # Map filename to direct URL for fallback
+                if direct_url:
+                    direct_url_map[new_filename] = direct_url
+                
+                size = get_file_size(new_path)
+                log_to_socket(job_id, f"SAVED: {new_filename} ({size})", "acid")
+                result_files.append({"filename": new_filename})
+                track_file(new_filename)
 
         background_jobs[job_id].update({'status': 'completed', 'files': result_files})
         socketio.emit('job_completed', {"job_id": job_id, "files": result_files})
@@ -208,18 +257,26 @@ def download():
     job_id = str(int(time.time() * 1000))
     background_jobs[job_id] = {'job_id': job_id, 'status': 'pending', 'url': url}
     
-    # Run in background to prevent HTTP timeouts
+    # Run in background locally, but synchronously on Vercel to avoid process termination
+    is_vercel = os.environ.get('VERCEL')
+    
     if 'instagram.com' in url:
-        thread = threading.Thread(target=download_instagram, args=(url, job_id))
+        target_fn = download_instagram
     elif any(d in url for d in ['twitter.com', 'x.com', 'fixupx.com', 'fxtwitter.com']):
-        thread = threading.Thread(target=download_twitter, args=(url, job_id))
+        target_fn = download_twitter
     else:
         return jsonify({"error": "Unsupported platform"}), 400
+
+    if is_vercel:
+        # Call directly and wait (Fast path handles speed)
+        target_fn(url, job_id)
+    else:
+        # Local development: use background thread
+        thread = threading.Thread(target=target_fn, args=(url, job_id))
+        thread.daemon = True
+        thread.start()
     
-    thread.daemon = True
-    thread.start()
-    
-    return jsonify({"job_id": job_id, "status": "pending"})
+    return jsonify({"job_id": job_id, "status": "pending" if not is_vercel else "completed"})
 
 @app.route('/job/<job_id>')
 def get_job_status(job_id):
@@ -230,7 +287,16 @@ def get_job_status(job_id):
 
 @app.route('/get_file/<filename>')
 def get_file(filename):
-    return send_from_directory(DOWNLOAD_DIR, filename)
+    path = os.path.join(DOWNLOAD_DIR, filename)
+    if os.path.exists(path):
+        return send_from_directory(DOWNLOAD_DIR, filename, as_attachment=True)
+    
+    # Fallback for Vercel ephemeral storage or long background tasks
+    direct_url = direct_url_map.get(filename)
+    if direct_url:
+        return redirect(direct_url)
+        
+    return jsonify({"error": "File not found or expired"}), 404
 
 @app.route('/crop', methods=['POST'])
 def crop_video():
