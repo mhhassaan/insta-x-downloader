@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
     <title>InstaX Downloader</title>
-    <!-- Fonts: Outfit for display, Plus Jakarta Sans for UI -->
+    <!-- Fonts: Space Grotesk for display, Inter for UI, Space Mono for labels -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@700;800&family=Plus+Jakarta+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
     
     <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
@@ -28,7 +28,7 @@
         <!-- Header -->
         <header class="app-header anim-entry">
             <div style="position: absolute; right: 0; top: 0; z-index: 10;">
-                <button id="theme-toggle" class="icon-btn" title="Toggle Dark Mode" style="width: 40px; height: 40px;">
+                <button id="theme-toggle" class="icon-btn" title="Toggle Dark Mode">
                     <svg class="moon-icon" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"></path></svg>
                 </button>
             </div>
@@ -40,23 +40,23 @@
         <section class="input-section anim-entry">
             <div class="platform-toggles">
                 <button class="tab-btn active" data-platform="all">ANY</button>
-                <button class="tab-btn" data-platform="instagram">IG</button>
-                <button class="tab-btn" data-platform="twitter">X/TWT</button>
+                <button class="tab-btn" data-platform="instagram">INSTAGRAM</button>
+                <button class="tab-btn" data-platform="twitter">X / TWITTER</button>
             </div>
 
             <div class="input-wrapper">
-                <input type="url" id="url-input" placeholder="HTTPS://..." autocomplete="off">
-                <button id="download-btn" class="brutal-btn">EXTRACT</button>
+                <input type="url" id="url-input" placeholder="Paste URL here..." autocomplete="off">
+                <button id="download-btn" class="brutal-btn">Extract Media</button>
             </div>
         </section>
 
         <!-- Results Section -->
         <section class="results-section">
             <div class="results-header anim-entry">
-                <h2>OUTPUT</h2>
-                <button id="clear-btn" class="brutal-btn-small">CLEAR</button>
+                <h2>Media Gallery</h2>
+                <button id="clear-btn" class="brutal-btn-small">Clear All</button>
             </div>
-            <div id="empty-state" class="anim-entry">AWAITING INPUT...</div>
+            <div id="empty-state" class="anim-entry" style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.28px; text-align: center; padding-top: 24px;">READY FOR EXTRACTION</div>
             <div id="results-wrapper" class="results-grid">
                 <!-- Results go here -->
             </div>
@@ -70,7 +70,7 @@
     <div class="modal-overlay" id="crop-modal">
         <div class="modal-content">
             <div class="modal-header">
-                <div class="modal-title">EDITOR</div>
+                <div class="modal-title">Media Editor</div>
                 <button class="close-modal" id="close-modal">&times;</button>
             </div>
             
@@ -113,10 +113,10 @@
             </div>
 
             <div class="modal-footer">
-                <button class="btn-secondary" id="cancel-crop">CANCEL</button>
+                <button class="btn-secondary" id="cancel-crop">Close</button>
                 <div class="footer-actions-right">
-                    <button class="btn-primary btn-select" id="start-crop-selection">SELECT AREA</button>
-                    <button class="btn-primary" id="apply-crop" style="display:none;">PROCESS VIDEO</button>
+                    <button class="btn-primary btn-select" id="start-crop-selection">Define Area</button>
+                    <button class="btn-primary" id="apply-crop" style="display:none;">Process</button>
                 </div>
             </div>
         </div>
@@ -175,11 +175,26 @@
 
             // --- SOCKET LISTENERS ---
             socket.on('connect', () => {
-                showToast('SYSTEM ONLINE: SOCKET CONNECTED', 'acid');
+                // Connection notification removed per request
             });
 
             socket.on('system_log', (data) => {
-                showToast(data.message, data.type);
+                if (data.type === 'error') {
+                    showToast(data.message, 'error');
+                }
+            });
+
+            socket.on('job_completed', (data) => {
+                if (currentJobId === data.job_id) {
+                    completeJob(data);
+                }
+            });
+
+            socket.on('job_failed', (data) => {
+                if (currentJobId === data.job_id) {
+                    resetState();
+                    showToast(`ERROR: ${data.error || 'EXTRACTION FAILED'}`, 'error');
+                }
             });
 
             // --- TOAST LOGIC ---
@@ -225,7 +240,6 @@
                     tabBtns.forEach(b => b.classList.remove('active'));
                     btn.classList.add('active');
                     activePlatform = btn.dataset.platform;
-                    showToast(`PLATFORM SWITCH: ${activePlatform.toUpperCase()}`);
                 });
             });
 
@@ -254,7 +268,6 @@
             function startDownload(url) {
                 downloadBtn.disabled = true;
                 downloadBtn.textContent = 'EXTRACTING...';
-                showToast(`INITIATING EXTRACTION: ${url.substring(0, 30)}...`, 'acid');
 
                 fetch('/download', {
                     method: 'POST',
@@ -263,16 +276,43 @@
                 })
                 .then(res => res.json())
                 .then(data => {
-                    if (data.error && data.status !== 'completed') {
-                        throw new Error(data.error);
-                    }
+                    if (data.error) throw new Error(data.error);
+                    currentJobId = data.job_id;
                     
-                    if (data.status === 'completed') {
-                        completeJob(data);
-                    } else if (data.status === 'failed') {
-                        resetState();
-                        showToast(`ERROR: ${data.error || 'EXTRACTION FAILED'}`, 'error');
-                    }
+                    // Robust Polling Fallback
+                    let pollCount = 0;
+                    const pollInterval = setInterval(() => {
+                        if (!currentJobId) {
+                            clearInterval(pollInterval);
+                            return;
+                        }
+                        
+                        pollCount++;
+                        fetch(`/job/${currentJobId}`)
+                            .then(res => res.json())
+                            .then(statusData => {
+                                if (statusData.status === 'completed') {
+                                    clearInterval(pollInterval);
+                                    if (currentJobId === statusData.job_id) {
+                                        completeJob(statusData);
+                                    }
+                                } else if (statusData.status === 'failed') {
+                                    clearInterval(pollInterval);
+                                    if (currentJobId === statusData.job_id) {
+                                        resetState();
+                                        showToast(`ERROR: ${statusData.error || 'EXTRACTION FAILED'}`, 'error');
+                                    }
+                                }
+                                
+                                // Timeout after 5 minutes (X downloads can be slow)
+                                if (pollCount > 150) {
+                                    clearInterval(pollInterval);
+                                    resetState();
+                                    showToast('ERROR: EXTRACTION TIMEOUT (NO UPDATE FROM SERVER)', 'error');
+                                }
+                            })
+                            .catch(() => { /* Silent network error */ });
+                    }, 2000); 
                 })
                 .catch(err => {
                     resetState();
@@ -316,14 +356,15 @@
                 const isVid = file.filename.match(/\.(mp4|mov|webm)$/i);
 
                 let mediaHtml = isVid 
-                    ? `<video src="${url}" autoplay muted loop playsinline></video>` 
+                    ? `<video src="${url}" controls autoplay muted loop playsinline></video>` 
                     : `<img src="${url}">`;
 
                 let actionHtml = `
                     <div class="action-group">
                         ${isVid ? `
-                            <button class="icon-btn crop-trigger" data-filename="${file.filename}" title="EDITOR">
+                            <button class="icon-btn-wide crop-trigger" data-filename="${file.filename}" title="Media Editor">
                                 <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><path d="M4 14v4a2 2 0 002 2h4m8-20v4m0 0H6a2 2 0 00-2 2v8m8-10h8a2 2 0 012 2v8a2 2 0 01-2 2h-4"></path></svg>
+                                <span>Edit</span>
                             </button>
                         ` : ''}
                         <a href="${url}" download class="icon-btn" title="DOWNLOAD">
@@ -346,7 +387,6 @@
                 const cropBtn = el.querySelector('.crop-trigger');
                 if(cropBtn) {
                     cropBtn.addEventListener('click', () => {
-                        showToast(`OPENING EDITOR: ${file.filename}`);
                         openCropModal(file.filename, url);
                     });
                 }
@@ -512,7 +552,6 @@
                         modal.style.display = 'none';
                         if(cropper) { cropper.destroy(); cropper = null; }
                         modalBody.innerHTML = '';
-                        showToast('EDITOR CLOSED');
                     } 
                 });
             }
@@ -522,7 +561,6 @@
 
             // Clear Handler
             clearBtn.addEventListener('click', () => {
-                showToast('CLEANING WORKSPACE...', 'acid');
                 fetch('/cleanup_session', { method: 'POST' });
 
                 anime({
@@ -537,7 +575,6 @@
                         emptyState.style.display = 'block';
                         clearBtn.style.opacity = 0;
                         setTimeout(() => clearBtn.style.display = 'none', 300);
-                        showToast('WORKSPACE CLEANED');
                     }
                 });
             });

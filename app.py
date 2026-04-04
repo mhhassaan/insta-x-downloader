@@ -79,42 +79,40 @@ def download_instagram(url, job_id):
     try:
         log_to_socket(job_id, "ESTABLISHING CONNECTION: instagram.com", "info")
         temp_dir = tempfile.mkdtemp()
-        job_info = background_jobs[job_id]
-        job_info['status'] = 'downloading'
+        background_jobs[job_id]['status'] = 'downloading'
 
         shortcode_match = re.search(r'instagram\.com/p/([^/]+)', url) or re.search(r'instagram\.com/reel/([^/]+)', url)
         if not shortcode_match:
             log_to_socket(job_id, "ERROR: INVALID POST ID", "error")
-            job_info['status'] = 'failed'
+            background_jobs[job_id]['status'] = 'failed'
             return
 
         shortcode = shortcode_match.group(1).rstrip('/')
         log_to_socket(job_id, f"METADATA EXTRACTED: ID {shortcode}", "acid")
 
-        L = instaloader.Instaloader(dirname_pattern=temp_dir, download_videos=True, quiet=True)
+        L = instaloader.Instaloader(download_videos=True, quiet=True)
+        L.dirname_pattern = temp_dir
+        
         post = instaloader.Post.from_shortcode(L.context, shortcode)
         username = post.owner_username
         log_to_socket(job_id, f"SOURCE IDENTIFIED: @{username.upper()}", "acid")
         
         log_to_socket(job_id, "EXTRACTING RESOURCES...", "info")
-        L.download_post(post, target=temp_dir)
+        L.download_post(post, target="post_data")
 
-        # Filter files: If a video exists for an ID, skip the JPG (thumbnail) for that same ID
         all_files = []
         for root, _, files in os.walk(temp_dir):
             for file in files:
                 if file.endswith(('.jpg', '.mp4', '.webp')):
                     all_files.append(os.path.join(root, file))
         
-        # Group by base name (instaloader usually uses the same base name for video and its thumb)
-        # e.g. 2024-03-19_12-00-00_UTC.mp4 and 2024-03-19_12-00-00_UTC.jpg
         video_bases = {os.path.splitext(os.path.basename(f))[0] for f in all_files if f.endswith('.mp4')}
         
         downloaded_files = []
         for f in all_files:
             base = os.path.splitext(os.path.basename(f))[0]
             if f.endswith('.jpg') and base in video_bases:
-                continue # Skip thumbnail if we have the video
+                continue 
             downloaded_files.append(f)
 
         current_date = datetime.now().strftime("%Y%m%d")
@@ -129,32 +127,42 @@ def download_instagram(url, job_id):
             result_files.append({"filename": new_filename})
             track_file(new_filename)
 
-        job_info['status'] = 'completed'
-        job_info['files'] = result_files
+        background_jobs[job_id].update({'status': 'completed', 'files': result_files})
+        socketio.emit('job_completed', {"job_id": job_id, "files": result_files})
         shutil.rmtree(temp_dir)
     except Exception as e:
         log_to_socket(job_id, f"CRITICAL FAILURE: {str(e)}", "error")
-        if job_id in background_jobs: background_jobs[job_id]['status'] = 'failed'
+        background_jobs[job_id]['status'] = 'failed'
+        socketio.emit('job_failed', {"job_id": job_id, "error": str(e)})
 
 def download_twitter(url, job_id):
     try:
+        # Normalize redirects
+        url = url.replace('fixupx.com', 'x.com').replace('fxtwitter.com', 'x.com')
+        
         log_to_socket(job_id, "ESTABLISHING CONNECTION: x.com", "info")
         temp_dir = tempfile.mkdtemp()
-        job_info = background_jobs[job_id]
-        job_info['status'] = 'downloading'
+        background_jobs[job_id]['status'] = 'downloading'
 
-        username_match = re.search(r'twitter\.com/([^/]+)', url) or re.search(r'x\.com/([^/]+)', url)
+        username_match = re.search(r'(?:twitter\.com|x\.com|fixupx\.com|fxtwitter\.com)/([^/]+)', url)
         username = username_match.group(1) if username_match else "twitter_user"
         log_to_socket(job_id, f"METADATA EXTRACTED: SOURCE @{username.upper()}", "acid")
 
+        def progress_hook(d):
+            if d['status'] == 'downloading':
+                percent = d.get('_percent_str', '0%')
+                speed = d.get('_speed_str', 'N/A')
+                log_to_socket(job_id, f"DOWNLOADING: {percent} (at {speed})", "info")
+
         output_template = os.path.join(temp_dir, f"%(id)s.%(ext)s")
-        # Ensure we only download the best video format and skip others
         ydl_opts = {
             'outtmpl': output_template, 
             'quiet': True, 
             'noplaylist': True,
-            'format': 'bestvideo+bestaudio/best', # Merge best video and audio
-            'writethumbnail': False # Explicitly disable thumbnails to avoid duplicates
+            'format': 'bestvideo+bestaudio/best',
+            'writethumbnail': False,
+            'progress_hooks': [progress_hook],
+            'nocheckcertificate': True
         }
         if FFMPEG_PATH: ydl_opts['ffmpeg_location'] = FFMPEG_PATH
 
@@ -180,12 +188,13 @@ def download_twitter(url, job_id):
             result_files.append({"filename": new_filename})
             track_file(new_filename)
 
-        job_info['status'] = 'completed'
-        job_info['files'] = result_files
+        background_jobs[job_id].update({'status': 'completed', 'files': result_files})
+        socketio.emit('job_completed', {"job_id": job_id, "files": result_files})
         shutil.rmtree(temp_dir)
     except Exception as e:
         log_to_socket(job_id, f"CRITICAL FAILURE: {str(e)}", "error")
-        if job_id in background_jobs: background_jobs[job_id]['status'] = 'failed'
+        background_jobs[job_id]['status'] = 'failed'
+        socketio.emit('job_failed', {"job_id": job_id, "error": str(e)})
 
 @app.route('/')
 def index(): return render_template('index.html')
@@ -195,15 +204,29 @@ def download():
     data = request.get_json()
     url = data.get('url', '')
     if not url: return jsonify({"error": "No URL provided"})
+    
     job_id = str(int(time.time() * 1000))
-    background_jobs[job_id] = {'status': 'pending', 'url': url}
+    background_jobs[job_id] = {'job_id': job_id, 'status': 'pending', 'url': url}
     
-    # Run synchronously for Vercel compatibility, but socket will stream progress
-    if 'instagram.com' in url: download_instagram(url, job_id)
-    elif 'twitter.com' in url or 'x.com' in url: download_twitter(url, job_id)
-    else: return jsonify({"error": "Unsupported platform"})
+    # Run in background to prevent HTTP timeouts
+    if 'instagram.com' in url:
+        thread = threading.Thread(target=download_instagram, args=(url, job_id))
+    elif any(d in url for d in ['twitter.com', 'x.com', 'fixupx.com', 'fxtwitter.com']):
+        thread = threading.Thread(target=download_twitter, args=(url, job_id))
+    else:
+        return jsonify({"error": "Unsupported platform"}), 400
     
-    return jsonify(background_jobs[job_id])
+    thread.daemon = True
+    thread.start()
+    
+    return jsonify({"job_id": job_id, "status": "pending"})
+
+@app.route('/job/<job_id>')
+def get_job_status(job_id):
+    job = background_jobs.get(job_id)
+    if not job: return jsonify({"error": "Job not found"}), 404
+    return jsonify(job)
+
 
 @app.route('/get_file/<filename>')
 def get_file(filename):
